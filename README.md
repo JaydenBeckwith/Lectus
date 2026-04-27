@@ -1,6 +1,6 @@
 # Lectus
 
-> _Lectus_ — Latin, "having been read."
+> _Lectus_ - Latin, "having been read."
 
 An AI-assisted research paper library for organising, visualising, and synthesising scientific literature. Built with React + Vite. Uses the Anthropic API to extract metadata from PDFs, answer questions across your library, and draft literature-review paragraphs.
 
@@ -21,6 +21,11 @@ npm install
 cp .env       # then add your Anthropic API key
 npm run dev
 ```
+## Docker
+
+```bash
+docker run -it --rm -v "${PWD}:/app" -w /app -p 5173:5173 node:24-slim sh
+```
 
 Open http://localhost:5173.
 
@@ -30,7 +35,7 @@ Open http://localhost:5173.
 | -------------------------- | ----------------------------------------------- |
 | `VITE_ANTHROPIC_API_KEY`   | Anthropic API key used by all AI features.      |
 
-> ⚠️ **Security note.** Anything prefixed with `VITE_` is bundled into the client JavaScript and visible to anyone who opens devtools. This setup is intended for **local development only**. Before deploying anywhere public, route the Anthropic calls through a server-side proxy and remove the key from the client.
+> **Security note.** Anything prefixed with `VITE_` is bundled into the client JavaScript and visible to anyone who opens devtools. This setup is intended for **local development only**. Before deploying anywhere public, route the Anthropic calls through a server-side proxy and remove the key from the client.
 
 ## Project structure
 
