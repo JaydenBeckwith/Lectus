@@ -2,7 +2,13 @@
 
 > _Lectus_ - Latin, "having been read."
 
-An AI-assisted research paper library for organising, visualising, and synthesising scientific literature. Built with React + Vite. Uses the Anthropic API to extract metadata from PDFs, answer questions across your library, and draft literature-review paragraphs. Lectus is a local-first desktop research assistant. Users keep their paper library and API key on their own machine.
+Researchers read dozens of papers, but struggle to remember key findings and how studies connect. Knowledge becomes fragmented, and valuable time is lost re-reading and piecing insights together.
+
+**Lectus** is an AI-assisted research copilot designed to solve this problem. It helps researchers organise, visualise, and synthesise scientific literature in one place. By combining a structured paper library with AI-powered analysis, Lectus enables users to quickly revisit prior knowledge, explore relationships between papers, and generate coherent literature summaries.
+
+Built with React + Vite, Lectus uses the Anthropic API to extract metadata from PDFs, answer questions across your library, and draft literature-review paragraphs.
+
+Lectus is a local-first desktop research assistant - your papers, notes, and API keys stay on your machine.
 
 ## Features
 
