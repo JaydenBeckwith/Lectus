@@ -1,24 +1,29 @@
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { THEMES } from "./constants/themes";
 import { SEED_PAPERS } from "./constants/seedPapers";
 import {
-  askLibrary,
+  askLibraryStream,
   extractPaperFromPdf,
   generateReviewParagraph,
+  generateStructuredReview,
 } from "./api/anthropic";
+import { lookupDoi } from "./api/crossref";
+import { loadPapers, savePapers, loadPrefs, savePrefs } from "./storage/persistence";
+import useDebouncedEffect from "./hooks/useDebouncedEffect";
+import { papersToBibtex, parseBibtex } from "./utils/bibtex";
 
 import TopBar from "./components/TopBar";
 import LibraryView from "./components/LibraryView";
 import GraphView from "./components/GraphView";
 import TimelineView from "./components/TimelineView";
+import CompareView from "./components/CompareView";
 import PaperDetail from "./components/PaperDetail";
 import ChatView from "./components/ChatView";
 import ReviewView from "./components/ReviewView";
 import AddView from "./components/AddView";
 import SettingsView from "./components/SettingsView";
 
-// Read a File as base64 (without the data: prefix).
 const readAsBase64 = (file) =>
   new Promise((resolve, reject) => {
     const r = new FileReader();
@@ -27,14 +32,34 @@ const readAsBase64 = (file) =>
     r.readAsDataURL(file);
   });
 
+const readAsText = (file) =>
+  new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(new Error("Read failed"));
+    r.readAsText(file);
+  });
+
+const downloadString = (filename, content, mime = "text/plain;charset=utf-8") => {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+};
+
+const todayStamp = () => new Date().toISOString().slice(0, 10);
+
 export default function App() {
-  // Theme state — base theme + optional accent override
   const [themeKey, setThemeKey] = useState("midnight");
   const [accentColor, setAccentColor] = useState(null);
   const baseTheme = THEMES[themeKey];
   const theme = accentColor ? { ...baseTheme, accent: accentColor } : baseTheme;
 
-  // Library state
   const [papers, setPapers] = useState(SEED_PAPERS);
   const [view, setView] = useState("library");
   const [selected, setSelected] = useState(null);
@@ -42,22 +67,69 @@ export default function App() {
   const [activeTag, setActiveTag] = useState(null);
   const [statusFilter, setStatusFilter] = useState("all");
 
-  // Chat state
+  const [hydrated, setHydrated] = useState(false);
+  const skipNextSave = useRef(false);
+
   const [messages, setMessages] = useState([]);
   const [chatInput, setChatInput] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // PDF upload state
   const [pdfLoading, setPdfLoading] = useState(false);
   const [pdfStatus, setPdfStatus] = useState("");
 
-  // Literature review state
   const [reviewSelection, setReviewSelection] = useState([]);
+  const [reviewMode, setReviewMode] = useState("paragraph");
   const [reviewOutput, setReviewOutput] = useState("");
+  const [reviewStructured, setReviewStructured] = useState(null);
   const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewError, setReviewError] = useState("");
   const [reviewTopic, setReviewTopic] = useState("");
 
-  // Derived data
+  // Hydrate from IndexedDB
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const [storedPapers, storedPrefs] = await Promise.all([loadPapers(), loadPrefs()]);
+      if (cancelled) return;
+      skipNextSave.current = true;
+      if (storedPapers) setPapers(storedPapers);
+      if (storedPrefs) {
+        if (storedPrefs.themeKey && THEMES[storedPrefs.themeKey]) {
+          setThemeKey(storedPrefs.themeKey);
+        }
+        if (storedPrefs.accentColor !== undefined) {
+          setAccentColor(storedPrefs.accentColor);
+        }
+      }
+      setHydrated(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useDebouncedEffect(
+    () => {
+      if (!hydrated) return;
+      if (skipNextSave.current) {
+        skipNextSave.current = false;
+        return;
+      }
+      savePapers(papers);
+    },
+    [papers, hydrated],
+    250
+  );
+
+  useDebouncedEffect(
+    () => {
+      if (!hydrated) return;
+      savePrefs({ themeKey, accentColor });
+    },
+    [themeKey, accentColor, hydrated],
+    250
+  );
+
   const allTags = useMemo(
     () => [...new Set(papers.flatMap((p) => p.tags))].sort(),
     [papers]
@@ -87,7 +159,6 @@ export default function App() {
     [theme]
   );
 
-  // ── Mutations ────────────────────────────────────────────────────────────
   const updatePaper = (id, updates) => {
     setPapers((prev) => prev.map((p) => (p.id === id ? { ...p, ...updates } : p)));
     if (selected?.id === id) setSelected((prev) => ({ ...prev, ...updates }));
@@ -98,22 +169,34 @@ export default function App() {
     setView("paper");
   };
 
-  // ── Chat ────────────────────────────────────────────────────────────────
+  // Streaming chat
   const sendChat = async (override) => {
     const msg = override || chatInput;
     if (!msg.trim()) return;
-    const newMsgs = [...messages, { role: "user", content: msg }];
-    setMessages(newMsgs);
+    const userMsg = { role: "user", content: msg };
+    const newMsgs = [...messages, userMsg];
+    setMessages([...newMsgs, { role: "assistant", content: "", streaming: true }]);
     setChatInput("");
     setLoading(true);
+
+    const replaceLast = (updater) =>
+      setMessages((prev) => {
+        const out = prev.slice(0, -1);
+        out.push(updater(prev[prev.length - 1]));
+        return out;
+      });
+
     try {
-      const reply = await askLibrary(papers, newMsgs);
-      setMessages([...newMsgs, { role: "assistant", content: reply }]);
+      await askLibraryStream(papers, newMsgs, (partial) => {
+        replaceLast((m) => ({ ...m, content: partial }));
+      });
+      replaceLast((m) => ({ ...m, streaming: false }));
     } catch (err) {
-      setMessages([
-        ...newMsgs,
-        { role: "assistant", content: `Connection error: ${err.message}` },
-      ]);
+      replaceLast(() => ({
+        role: "assistant",
+        content: `Connection error: ${err.message}`,
+        streaming: false,
+      }));
     } finally {
       setLoading(false);
     }
@@ -124,7 +207,6 @@ export default function App() {
     sendChat(prompt);
   };
 
-  // ── PDF upload ──────────────────────────────────────────────────────────
   const handlePdfUpload = async (file) => {
     if (!file) return;
     if (file.type !== "application/pdf") {
@@ -157,17 +239,106 @@ export default function App() {
     }
   };
 
-  // ── Literature review ───────────────────────────────────────────────────
+  const handleDoiLookup = async (doi) => {
+    const meta = await lookupDoi(doi);
+    if (papers.some((p) => p.doi && p.doi.toLowerCase() === meta.doi.toLowerCase())) {
+      throw new Error("DOI already in your library");
+    }
+    const newPaper = {
+      id: `p${Date.now()}`,
+      ...meta,
+      notes: "",
+      highlights: [],
+      status: "to-read",
+    };
+    setPapers((prev) => [newPaper, ...prev]);
+    return newPaper;
+  };
+
+  const exportBibtex = () => {
+    if (!papers.length) return;
+    downloadString(`lectus-${todayStamp()}.bib`, papersToBibtex(papers), "application/x-bibtex;charset=utf-8");
+  };
+
+  const exportJson = () => {
+    const payload = {
+      app: "lectus",
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      papers,
+    };
+    downloadString(
+      `lectus-backup-${todayStamp()}.json`,
+      JSON.stringify(payload, null, 2),
+      "application/json;charset=utf-8"
+    );
+  };
+
+  const mergePapers = (existing, incoming) => {
+    const byDoi = new Map();
+    const byTitle = new Map();
+    for (const p of existing) {
+      if (p.doi) byDoi.set(p.doi.toLowerCase(), true);
+      if (p.title) byTitle.set(p.title.toLowerCase(), true);
+    }
+    let added = 0;
+    let skipped = 0;
+    const next = [...existing];
+    for (const p of incoming) {
+      const dKey = p.doi ? p.doi.toLowerCase() : null;
+      const tKey = p.title ? p.title.toLowerCase() : null;
+      if ((dKey && byDoi.has(dKey)) || (tKey && byTitle.has(tKey))) {
+        skipped++;
+        continue;
+      }
+      next.unshift(p);
+      if (dKey) byDoi.set(dKey, true);
+      if (tKey) byTitle.set(tKey, true);
+      added++;
+    }
+    return { next, added, skipped };
+  };
+
+  const handleImportFile = async (file) => {
+    const text = await readAsText(file);
+    const lower = file.name.toLowerCase();
+    let incoming = [];
+    if (lower.endsWith(".json") || text.trim().startsWith("{")) {
+      const parsed = JSON.parse(text);
+      const list = Array.isArray(parsed) ? parsed : parsed.papers;
+      if (!Array.isArray(list)) throw new Error("JSON has no `papers` array");
+      incoming = list.map((p) => ({
+        notes: "",
+        highlights: [],
+        status: "to-read",
+        ...p,
+        id: p.id || `p${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      }));
+    } else {
+      incoming = parseBibtex(text);
+    }
+    const { next, added, skipped } = mergePapers(papers, incoming);
+    setPapers(next);
+    return { added, skipped };
+  };
+
   const generateReview = async () => {
     if (reviewSelection.length < 2) return;
     setReviewLoading(true);
+    setReviewError("");
     setReviewOutput("");
+    setReviewStructured(null);
     const sp = papers.filter((p) => reviewSelection.includes(p.id));
     try {
-      const out = await generateReviewParagraph(sp, reviewTopic);
-      setReviewOutput(out);
+      if (reviewMode === "structured") {
+        const parsed = await generateStructuredReview(sp, reviewTopic);
+        setReviewStructured(parsed);
+      } else {
+        const out = await generateReviewParagraph(sp, reviewTopic);
+        setReviewOutput(out);
+      }
     } catch (err) {
-      setReviewOutput(`Connection error: ${err.message}`);
+      setReviewError(`Could not generate review: ${err.message}`);
     } finally {
       setReviewLoading(false);
     }
@@ -185,8 +356,6 @@ export default function App() {
         transition: "background .3s",
       }}
     >
-      {/* Themed scrollbars + animations injected per render so they pick up
-          the current theme colours. */}
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Instrument+Sans:wght@400;500&display=swap');
         *{box-sizing:border-box;margin:0;padding:0}
@@ -220,13 +389,9 @@ export default function App() {
         />
       )}
 
-      {view === "graph" && (
-        <GraphView papers={papers} onSelectPaper={openPaper} theme={theme} />
-      )}
-
-      {view === "timeline" && (
-        <TimelineView papers={papers} onSelectPaper={openPaper} theme={theme} />
-      )}
+      {view === "graph" && <GraphView papers={papers} onSelectPaper={openPaper} theme={theme} />}
+      {view === "timeline" && <TimelineView papers={papers} onSelectPaper={openPaper} theme={theme} />}
+      {view === "compare" && <CompareView papers={papers} onSelectPaper={openPaper} theme={theme} />}
 
       {view === "paper" && selected && (
         <PaperDetail
@@ -258,8 +423,12 @@ export default function App() {
           setReviewSelection={setReviewSelection}
           reviewTopic={reviewTopic}
           setReviewTopic={setReviewTopic}
+          reviewMode={reviewMode}
+          setReviewMode={setReviewMode}
           reviewOutput={reviewOutput}
+          reviewStructured={reviewStructured}
           reviewLoading={reviewLoading}
+          reviewError={reviewError}
           onGenerate={generateReview}
           theme={theme}
         />
@@ -270,6 +439,7 @@ export default function App() {
           pdfLoading={pdfLoading}
           pdfStatus={pdfStatus}
           onPdfUpload={handlePdfUpload}
+          onDoiLookup={handleDoiLookup}
           theme={theme}
         />
       )}
@@ -281,6 +451,9 @@ export default function App() {
           accentColor={accentColor}
           setAccentColor={setAccentColor}
           papers={papers}
+          onExportBibtex={exportBibtex}
+          onExportJson={exportJson}
+          onImportFile={handleImportFile}
           theme={theme}
         />
       )}

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { fmt } from "../utils/format";
+import Markdown from "./Markdown";
 
 const SUGGESTED_PROMPTS = [
   "Which papers discuss LAG3 and melanoma response?",
@@ -8,7 +8,9 @@ const SUGGESTED_PROMPTS = [
   "Summarise what I've highlighted and noted",
 ];
 
-// Chat panel for asking questions about the library.
+// Chat panel for asking questions about the library. Assistant messages can
+// be in-flight (`streaming: true`) while the SSE response arrives — we render
+// whatever text we have so far and show a small caret.
 export default function ChatView({
   papers,
   messages,
@@ -20,10 +22,13 @@ export default function ChatView({
 }) {
   const messagesEnd = useRef(null);
 
-  // Auto-scroll to the bottom when messages change.
   useEffect(() => {
     messagesEnd.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  const lastMsg = messages[messages.length - 1];
+  const showDots =
+    loading && (!lastMsg || lastMsg.role !== "assistant" || !lastMsg.content);
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -97,7 +102,14 @@ export default function ChatView({
               }}
             >
               {m.role === "assistant" ? (
-                <div dangerouslySetInnerHTML={{ __html: fmt(m.content) }} />
+                m.content ? (
+                  <>
+                    <Markdown theme={theme}>{m.content}</Markdown>
+                    {m.streaming && <StreamingCaret theme={theme} />}
+                  </>
+                ) : (
+                  <TypingDots theme={theme} />
+                )
               ) : (
                 m.content
               )}
@@ -105,7 +117,7 @@ export default function ChatView({
           </div>
         ))}
 
-        {loading && (
+        {showDots && messages.length > 0 && lastMsg.role === "user" && (
           <div className="fade-in" style={{ display: "flex" }}>
             <div
               style={{
@@ -114,11 +126,8 @@ export default function ChatView({
                 borderRadius: "16px 16px 16px 4px",
                 padding: "0.8rem 1rem",
               }}
-              className="typing"
             >
-              <span style={{ background: theme.accent }} />
-              <span style={{ background: theme.accent }} />
-              <span style={{ background: theme.accent }} />
+              <TypingDots theme={theme} />
             </div>
           </div>
         )}
@@ -176,5 +185,31 @@ export default function ChatView({
         </button>
       </div>
     </div>
+  );
+}
+
+function TypingDots({ theme }) {
+  return (
+    <div className="typing">
+      <span style={{ background: theme.accent }} />
+      <span style={{ background: theme.accent }} />
+      <span style={{ background: theme.accent }} />
+    </div>
+  );
+}
+
+function StreamingCaret({ theme }) {
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        width: 6,
+        height: 12,
+        marginLeft: 2,
+        verticalAlign: "text-bottom",
+        background: theme.accent,
+        animation: "blink 1s step-end infinite",
+      }}
+    />
   );
 }

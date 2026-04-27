@@ -12,6 +12,10 @@ build
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 
+# Electron / electron-builder output
+release
+out
+
 # Local env files
 .env
 .env.local

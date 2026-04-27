@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { tagColor } from "../constants/tagColors";
+import TagEditor from "./TagEditor";
 
 // Detail view for a single paper: status, abstract, key findings,
 // highlights and personal notes. Triggers a chat query via onAskAI.
@@ -68,7 +68,6 @@ export default function PaperDetail({
         {paper.authors}
       </div>
 
-      {/* Status pills */}
       <div style={{ display: "flex", gap: "0.4rem", marginBottom: "1rem" }}>
         {Object.entries(statusColors).map(([s, c]) => (
           <button
@@ -91,7 +90,6 @@ export default function PaperDetail({
         ))}
       </div>
 
-      {/* Journal / DOI badges */}
       <div style={{ display: "flex", gap: "0.75rem", marginBottom: "1rem", flexWrap: "wrap" }}>
         <span
           style={{
@@ -119,41 +117,24 @@ export default function PaperDetail({
         </span>
       </div>
 
-      {/* Tags */}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem", marginBottom: "1.25rem" }}>
-        {paper.tags.map((t) => (
-          <span
-            key={t}
-            style={{
-              background: tagColor(t) + "33",
-              color: tagColor(t) + "ee",
-              border: `1px solid ${tagColor(t)}44`,
-              borderRadius: 12,
-              padding: "0.2rem 0.65rem",
-              fontSize: "0.7rem",
-            }}
-          >
-            {t}
-          </span>
-        ))}
+      {/* Tags — editable */}
+      <div style={{ marginBottom: "1.25rem" }}>
+        <TagEditor
+          tags={paper.tags}
+          onChange={(next) => onUpdate(paper.id, { tags: next })}
+          theme={theme}
+        />
       </div>
 
-      {/* Abstract */}
       <Section title="Abstract" theme={theme}>
         <div style={{ fontSize: "0.83rem", lineHeight: 1.7, color: theme.text }}>{paper.abstract}</div>
       </Section>
 
-      {/* Key findings */}
       <Section title="Key Findings" theme={theme}>
         {paper.keyFindings.map((f, i) => (
           <div
             key={i}
-            style={{
-              display: "flex",
-              gap: "0.6rem",
-              marginBottom: "0.4rem",
-              alignItems: "flex-start",
-            }}
+            style={{ display: "flex", gap: "0.6rem", marginBottom: "0.4rem", alignItems: "flex-start" }}
           >
             <span style={{ color: theme.accent, fontSize: "0.7rem", marginTop: "0.15rem", flexShrink: 0 }}>◆</span>
             <span style={{ fontSize: "0.82rem", color: theme.text, lineHeight: 1.5 }}>{f}</span>
@@ -161,7 +142,6 @@ export default function PaperDetail({
         ))}
       </Section>
 
-      {/* Highlights */}
       <Section
         title="Highlights"
         theme={theme}
@@ -236,7 +216,6 @@ export default function PaperDetail({
         </div>
       </Section>
 
-      {/* Notes */}
       <Section
         title="My Notes"
         theme={theme}
@@ -354,7 +333,6 @@ export default function PaperDetail({
   );
 }
 
-// Small reusable card section used for abstract / findings / highlights / notes.
 function Section({ title, right, children, theme }) {
   return (
     <div
