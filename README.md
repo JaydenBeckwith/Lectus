@@ -2,7 +2,7 @@
 
 > _Lectus_ - Latin, "having been read."
 
-An AI-assisted research paper library for organising, visualising, and synthesising scientific literature. Built with React + Vite. Uses the Anthropic API to extract metadata from PDFs, answer questions across your library, and draft literature-review paragraphs.
+An AI-assisted research paper library for organising, visualising, and synthesising scientific literature. Built with React + Vite. Uses the Anthropic API to extract metadata from PDFs, answer questions across your library, and draft literature-review paragraphs. Lectus is a local-first desktop research assistant. Users keep their paper library and API key on their own machine.
 
 ## Features
 
@@ -13,6 +13,26 @@ An AI-assisted research paper library for organising, visualising, and synthesis
 - **Review** pick 2+ papers and get a publication-ready literature-review paragraph.
 - **Add** drop a PDF, AI extracts title, authors, journal, year, DOI, tags, abstract, and key findings.
 - **Themes** Midnight, Parchment, Ocean, Forest. Custom accent colour.
+
+
+## Coming Soon
+
+- **Persistent storage**  
+  Local-first database (IndexedDB/SQLite) to save papers, notes, highlights, and reviews across sessions.
+- **AI-powered multi-paper synthesis**  
+  Generate structured literature reviews across 5–20 papers, highlighting agreements, contradictions, and research gaps.
+- **Compare mode**  
+  Side-by-side comparison of findings across studies (e.g. biomarkers, pathways, clinical outcomes).
+- **Backend proxy for AI**  
+  Secure API layer to remove client-side keys and enable production deployment.
+- **Desktop app (.exe)**  
+  Packaged version using Electron/Tauri for a fully local research workflow.
+- **User profiles**  
+  Separate libraries, notes, and API keys for different users.
+- **Cloud sync (optional)**  
+  Sync your library across devices while keeping a local-first workflow.
+- **Domain-specific intelligence (biomedical focus)**  
+  Smarter synthesis for oncology, genomics, and translational research.
 
 ## Quick start
 
