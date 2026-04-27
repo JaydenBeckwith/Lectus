@@ -1,0 +1,16 @@
+/* Base reset — most layout/colour styling lives inline so the theme switcher
+   can control everything from one source of truth. */
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: #07090b;
+  color: #c8c0b4;
+}
