@@ -4,6 +4,7 @@ const VIEWS = [
   ["library", "Library"],
   ["graph", "Graph"],
   ["timeline", "Timeline"],
+  ["compare", "Compare"],
   ["chat", "Ask"],
   ["review", "Review"],
   ["add", "+ Add"],

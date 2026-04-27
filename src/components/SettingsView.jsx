@@ -1,3 +1,4 @@
+import { useRef, useState } from "react";
 import { THEMES } from "../constants/themes";
 
 const ACCENT_SWATCHES = [
@@ -11,15 +12,35 @@ const ACCENT_SWATCHES = [
   "#7ac49c",
 ];
 
-// Settings panel: theme picker, accent colour, library stats.
+// Settings panel: theme picker, accent colour, import/export, library stats.
 export default function SettingsView({
   themeKey,
   setThemeKey,
   accentColor,
   setAccentColor,
   papers,
+  onExportBibtex,
+  onExportJson,
+  onImportFile,
   theme,
 }) {
+  const importRef = useRef(null);
+  const [importStatus, setImportStatus] = useState("");
+
+  const handleImport = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportStatus("Reading file…");
+    try {
+      const result = await onImportFile(file);
+      setImportStatus(`✓ Imported ${result.added} paper${result.added === 1 ? "" : "s"} (${result.skipped} duplicates skipped)`);
+    } catch (err) {
+      setImportStatus(`Error: ${err.message}`);
+    }
+    if (importRef.current) importRef.current.value = "";
+    setTimeout(() => setImportStatus(""), 4000);
+  };
+
   return (
     <div
       style={{
@@ -178,6 +199,80 @@ export default function SettingsView({
         </div>
       </div>
 
+      {/* Import / Export */}
+      <div style={{ marginBottom: "2rem" }}>
+        <SectionLabel theme={theme}>Import / Export</SectionLabel>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", alignItems: "center" }}>
+          <button
+            onClick={onExportBibtex}
+            style={{
+              background: theme.chip,
+              border: `1px solid ${theme.chipBorder}`,
+              color: theme.accent,
+              borderRadius: 8,
+              padding: "0.5rem 0.95rem",
+              fontSize: "0.78rem",
+              cursor: "pointer",
+            }}
+          >
+            Export BibTeX
+          </button>
+          <button
+            onClick={onExportJson}
+            style={{
+              background: theme.chip,
+              border: `1px solid ${theme.chipBorder}`,
+              color: theme.accent,
+              borderRadius: 8,
+              padding: "0.5rem 0.95rem",
+              fontSize: "0.78rem",
+              cursor: "pointer",
+            }}
+          >
+            Export JSON backup
+          </button>
+          <button
+            onClick={() => importRef.current?.click()}
+            style={{
+              background: "transparent",
+              border: `1px solid ${theme.panelBorder}`,
+              color: theme.textSubtle,
+              borderRadius: 8,
+              padding: "0.5rem 0.95rem",
+              fontSize: "0.78rem",
+              cursor: "pointer",
+            }}
+          >
+            Import .bib or .json
+          </button>
+          <input
+            ref={importRef}
+            type="file"
+            accept=".bib,.json,application/json,text/plain"
+            onChange={handleImport}
+            style={{ display: "none" }}
+          />
+        </div>
+        {importStatus && (
+          <div
+            style={{
+              fontSize: "0.75rem",
+              color: importStatus.startsWith("✓")
+                ? "#6a9060"
+                : importStatus.startsWith("Error")
+                ? "#c47a6e"
+                : theme.accent,
+              marginTop: "0.6rem",
+            }}
+          >
+            {importStatus}
+          </div>
+        )}
+        <div style={{ fontSize: "0.68rem", color: theme.textMuted, marginTop: "0.5rem" }}>
+          BibTeX exports the bibliographic fields. JSON exports the full library including notes and highlights — use it as a backup.
+        </div>
+      </div>
+
       {/* Stats */}
       <div
         style={{
@@ -230,7 +325,7 @@ export default function SettingsView({
           fontStyle: "italic",
         }}
       >
-        Lectus · v0.4 · "Having been read"
+        Lectus · v0.6 · "Having been read"
       </div>
     </div>
   );
