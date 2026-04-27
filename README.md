@@ -44,9 +44,15 @@ Lectus is a local-first desktop research assistant - your papers, notes, and API
 
 ```bash
 npm install
-cp .env       # then add your Anthropic API key
+cp .env.example .env
 npm run dev
 ```
+### example API load
+```env
+## in .env.example 
+VITE_ANTHROPIC_API_KEY=your_api_key_here
+```
+
 ## Docker
 
 ```bash
