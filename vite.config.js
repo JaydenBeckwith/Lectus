@@ -1,17 +1,11 @@
 import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
+import react from "@vitejs/plugin-react-swc";
 
-// https://vitejs.dev/config/
-//
-// `base: "./"` so the built index.html resolves assets relative to itself.
-// That's required by Electron's file:// loader (and is harmless when serving
-// the build over plain HTTP).
+// SWC plugin variant — same fast-refresh, no Babel pipeline.
+// `base: "./"` so the built index.html resolves assets relative to itself
+// (required by Electron's file:// loader).
 export default defineConfig({
   plugins: [react()],
   base: "./",
-  server: {
-    port: 5173,
-    strictPort: true,
-    open: true,
-  },
+  server: { port: 5173, strictPort: true, open: true },
 });

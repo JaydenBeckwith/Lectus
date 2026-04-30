@@ -1,13 +1,27 @@
-// Electron main process. Creates a single BrowserWindow that loads either the
-// Vite dev server (when VITE_DEV_SERVER_URL is set) or the built static files
-// (when packaged). Keep this file CommonJS — Electron's main process supports
-// ESM but the toolchain story is simpler with .cjs and the project's
-// "type": "module" setting won't fight us.
-
-const { app, BrowserWindow, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, shell } = require("electron");
 const path = require("node:path");
+const fs = require("node:fs");
+const fsp = require("node:fs/promises");
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
+const libraryPath = () => path.join(app.getPath("userData"), "lectus-library.json");
+
+ipcMain.handle("lectus:saveLibrary", async (_evt, json) => {
+  const target = libraryPath();
+  await fsp.mkdir(path.dirname(target), { recursive: true });
+  const tmp = `${target}.tmp`;
+  await fsp.writeFile(tmp, json, "utf8");
+  await fsp.rename(tmp, target);
+  return { ok: true, path: target };
+});
+
+ipcMain.handle("lectus:loadLibrary", async () => {
+  const target = libraryPath();
+  if (!fs.existsSync(target)) return null;
+  return fsp.readFile(target, "utf8");
+});
+
+ipcMain.handle("lectus:libraryPath", async () => libraryPath());
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -24,14 +38,10 @@ function createWindow() {
       sandbox: true,
     },
   });
-
-  // Open external links (anything not the loaded app) in the user's default
-  // browser instead of inside the Electron window.
   win.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: "deny" };
   });
-
   if (isDev) {
     win.loadURL(process.env.VITE_DEV_SERVER_URL);
     win.webContents.openDevTools({ mode: "detach" });
@@ -48,6 +58,5 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => {
-  // Standard cross-platform quit behaviour: stay alive on macOS, quit elsewhere.
   if (process.platform !== "darwin") app.quit();
 });

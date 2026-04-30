@@ -1,9 +1,3 @@
-// ── Anthropic API client ──────────────────────────────────────────────────────
-// All HTTP traffic to the Anthropic Messages API lives here. The key is read
-// from import.meta.env.VITE_ANTHROPIC_API_KEY. Anything VITE_-prefixed is
-// inlined into the browser bundle, so this is fine for local development but
-// MUST be replaced with a server-side proxy before deploying anywhere public.
-
 import {
   SYSTEM_PROMPT,
   PDF_EXTRACT_PROMPT,
@@ -13,7 +7,16 @@ import {
 
 const ENDPOINT = "https://api.anthropic.com/v1/messages";
 const MODEL = "claude-sonnet-4-5";
-const API_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY;
+const ENV_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY;
+
+let runtimeKey = null;
+
+export const setRuntimeApiKey = (k) => {
+  runtimeKey = k && k.trim() ? k.trim() : null;
+};
+
+const getKey = () => runtimeKey || ENV_KEY || "";
+export const hasApiKey = () => Boolean(getKey());
 
 const headers = () => {
   const h = {
@@ -21,11 +24,19 @@ const headers = () => {
     "anthropic-version": "2023-06-01",
     "anthropic-dangerous-direct-browser-access": "true",
   };
-  if (API_KEY) h["x-api-key"] = API_KEY;
+  const key = getKey();
+  if (key) h["x-api-key"] = key;
   return h;
 };
 
+const ensureKey = () => {
+  if (!getKey()) {
+    throw new Error("No Anthropic API key — add one in Settings or set VITE_ANTHROPIC_API_KEY");
+  }
+};
+
 const post = async (body) => {
+  ensureKey();
   const res = await fetch(ENDPOINT, {
     method: "POST",
     headers: headers(),
@@ -38,7 +49,6 @@ const post = async (body) => {
   return res.json();
 };
 
-// Library chat (non-streaming) — kept around for fallbacks / tests.
 export const askLibrary = async (papers, messages) => {
   const data = await post({
     model: MODEL,
@@ -49,9 +59,8 @@ export const askLibrary = async (papers, messages) => {
   return data.content?.[0]?.text || "Error.";
 };
 
-// Streaming variant. Parses SSE text_delta events and pushes the running
-// total to onDelta(partialText). Resolves with the full final string.
 export const askLibraryStream = async (papers, messages, onDelta, signal) => {
+  ensureKey();
   const res = await fetch(ENDPOINT, {
     method: "POST",
     headers: headers(),
@@ -69,12 +78,10 @@ export const askLibraryStream = async (papers, messages, onDelta, signal) => {
     throw new Error(`Anthropic API ${res.status}: ${text || res.statusText}`);
   }
   if (!res.body) throw new Error("Streaming not supported in this environment");
-
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
   let full = "";
-
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
@@ -103,7 +110,6 @@ export const askLibraryStream = async (papers, messages, onDelta, signal) => {
   return full;
 };
 
-// Extract metadata from an uploaded PDF and return parsed JSON.
 export const extractPaperFromPdf = async (base64Pdf) => {
   const data = await post({
     model: MODEL,
@@ -112,14 +118,7 @@ export const extractPaperFromPdf = async (base64Pdf) => {
       {
         role: "user",
         content: [
-          {
-            type: "document",
-            source: {
-              type: "base64",
-              media_type: "application/pdf",
-              data: base64Pdf,
-            },
-          },
+          { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64Pdf } },
           { type: "text", text: PDF_EXTRACT_PROMPT },
         ],
       },
@@ -129,7 +128,6 @@ export const extractPaperFromPdf = async (base64Pdf) => {
   return JSON.parse(txt.replace(/```json|```/g, "").trim());
 };
 
-// Generate a literature-review paragraph from a selection of papers.
 export const generateReviewParagraph = async (papers, topic) => {
   const data = await post({
     model: MODEL,
@@ -139,8 +137,6 @@ export const generateReviewParagraph = async (papers, topic) => {
   return data.content?.[0]?.text || "Error.";
 };
 
-// Strip ```json fences and any leading/trailing prose so JSON.parse succeeds
-// even when the model gets chatty.
 const extractJson = (raw) => {
   const cleaned = raw.replace(/```json|```/g, "").trim();
   const start = cleaned.indexOf("{");
@@ -149,8 +145,6 @@ const extractJson = (raw) => {
   return JSON.parse(cleaned.slice(start, end + 1));
 };
 
-// Structured synthesis: returns a parsed object with agreements, contradictions,
-// gaps, future_directions, and per_paper contributions.
 export const generateStructuredReview = async (papers, topic) => {
   const data = await post({
     model: MODEL,
@@ -159,4 +153,20 @@ export const generateStructuredReview = async (papers, topic) => {
   });
   const raw = data.content?.[0]?.text || "";
   return extractJson(raw);
+};
+
+export const testConnection = async () => {
+  ensureKey();
+  const res = await fetch(ENDPOINT, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify({ model: MODEL, max_tokens: 1, messages: [{ role: "user", content: "ping" }] }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    let msg = res.statusText;
+    try { const j = JSON.parse(text); if (j?.error?.message) msg = j.error.message; } catch {}
+    throw new Error(`${res.status} ${msg}`);
+  }
+  return true;
 };

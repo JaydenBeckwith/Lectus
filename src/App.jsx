@@ -7,9 +7,13 @@ import {
   extractPaperFromPdf,
   generateReviewParagraph,
   generateStructuredReview,
+  setRuntimeApiKey,
+  testConnection,
 } from "./api/anthropic";
 import { lookupDoi } from "./api/crossref";
 import { loadPapers, savePapers, loadPrefs, savePrefs } from "./storage/persistence";
+import { getApiKey, setApiKey, clearApiKey } from "./storage/secrets";
+import { isElectron, saveLibraryToFile, loadLibraryFromFile } from "./storage/electronFile";
 import useDebouncedEffect from "./hooks/useDebouncedEffect";
 import { papersToBibtex, parseBibtex } from "./utils/bibtex";
 
@@ -23,35 +27,30 @@ import ChatView from "./components/ChatView";
 import ReviewView from "./components/ReviewView";
 import AddView from "./components/AddView";
 import SettingsView from "./components/SettingsView";
+import Onboarding from "./components/Onboarding";
 
-const readAsBase64 = (file) =>
-  new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(r.result.split(",")[1]);
-    r.onerror = () => reject(new Error("Read failed"));
-    r.readAsDataURL(file);
-  });
+const ENV_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY || "";
 
-const readAsText = (file) =>
-  new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(r.result);
-    r.onerror = () => reject(new Error("Read failed"));
-    r.readAsText(file);
-  });
-
+const readAsBase64 = (file) => new Promise((resolve, reject) => {
+  const r = new FileReader();
+  r.onload = () => resolve(r.result.split(",")[1]);
+  r.onerror = () => reject(new Error("Read failed"));
+  r.readAsDataURL(file);
+});
+const readAsText = (file) => new Promise((resolve, reject) => {
+  const r = new FileReader();
+  r.onload = () => resolve(r.result);
+  r.onerror = () => reject(new Error("Read failed"));
+  r.readAsText(file);
+});
 const downloadString = (filename, content, mime = "text/plain;charset=utf-8") => {
   const blob = new Blob([content], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(url);
 };
-
 const todayStamp = () => new Date().toISOString().slice(0, 10);
 
 export default function App() {
@@ -70,6 +69,15 @@ export default function App() {
   const [hydrated, setHydrated] = useState(false);
   const skipNextSave = useRef(false);
 
+  const [apiKey, setApiKeyState] = useState("");
+  const [apiKeySource, setApiKeySource] = useState("none");
+
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [onboardingSeen, setOnboardingSeen] = useState(false);
+
+  const [saveState, setSaveState] = useState("idle");
+  const savedTimerRef = useRef(null);
+
   const [messages, setMessages] = useState([]);
   const [chatInput, setChatInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -85,153 +93,132 @@ export default function App() {
   const [reviewError, setReviewError] = useState("");
   const [reviewTopic, setReviewTopic] = useState("");
 
-  // Hydrate from IndexedDB
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [storedPapers, storedPrefs] = await Promise.all([loadPapers(), loadPrefs()]);
+      const [storedPapers, storedPrefs, storedKey] = await Promise.all([loadPapers(), loadPrefs(), getApiKey()]);
       if (cancelled) return;
       skipNextSave.current = true;
-      if (storedPapers) setPapers(storedPapers);
-      if (storedPrefs) {
-        if (storedPrefs.themeKey && THEMES[storedPrefs.themeKey]) {
-          setThemeKey(storedPrefs.themeKey);
-        }
-        if (storedPrefs.accentColor !== undefined) {
-          setAccentColor(storedPrefs.accentColor);
-        }
+      let papersToUse = storedPapers;
+      if (!papersToUse && isElectron()) {
+        const fromFile = await loadLibraryFromFile();
+        if (fromFile?.length) papersToUse = fromFile;
       }
+      if (papersToUse) setPapers(papersToUse);
+      if (storedPrefs) {
+        if (storedPrefs.themeKey && THEMES[storedPrefs.themeKey]) setThemeKey(storedPrefs.themeKey);
+        if (storedPrefs.accentColor !== undefined) setAccentColor(storedPrefs.accentColor);
+        if (storedPrefs.onboardingSeen) setOnboardingSeen(true);
+      }
+      if (storedKey) {
+        setRuntimeApiKey(storedKey);
+        setApiKeyState(storedKey);
+        setApiKeySource("runtime");
+      } else if (ENV_KEY) {
+        setApiKeyState(ENV_KEY); setApiKeySource("env");
+      } else {
+        setApiKeyState(""); setApiKeySource("none");
+      }
+      if (!storedPrefs?.onboardingSeen) setShowOnboarding(true);
       setHydrated(true);
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, []);
 
-  useDebouncedEffect(
-    () => {
-      if (!hydrated) return;
-      if (skipNextSave.current) {
-        skipNextSave.current = false;
-        return;
-      }
-      savePapers(papers);
-    },
-    [papers, hydrated],
-    250
-  );
+  const flashSaved = () => {
+    setSaveState("saved");
+    if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+    savedTimerRef.current = setTimeout(() => setSaveState("idle"), 1400);
+  };
 
-  useDebouncedEffect(
-    () => {
-      if (!hydrated) return;
-      savePrefs({ themeKey, accentColor });
-    },
-    [themeKey, accentColor, hydrated],
-    250
-  );
+  useDebouncedEffect(() => {
+    if (!hydrated) return;
+    if (skipNextSave.current) { skipNextSave.current = false; return; }
+    setSaveState("saving");
+    (async () => {
+      try { await savePapers(papers); if (isElectron()) await saveLibraryToFile(papers); flashSaved(); }
+      catch { setSaveState("error"); }
+    })();
+  }, [papers, hydrated], 400);
 
-  const allTags = useMemo(
-    () => [...new Set(papers.flatMap((p) => p.tags))].sort(),
-    [papers]
-  );
+  useDebouncedEffect(() => {
+    if (!hydrated) return;
+    savePrefs({ themeKey, accentColor, onboardingSeen });
+  }, [themeKey, accentColor, onboardingSeen, hydrated], 250);
 
+  const openOnboarding = () => setShowOnboarding(true);
+  const dismissOnboarding = () => { setShowOnboarding(false); setOnboardingSeen(true); };
+  const handleOnboardingSave = async (k) => {
+    await setApiKey(k); setRuntimeApiKey(k);
+    setApiKeyState(k); setApiKeySource("runtime");
+    dismissOnboarding();
+  };
+  const handleSaveApiKey = async (k) => {
+    if (!k) return;
+    await setApiKey(k); setRuntimeApiKey(k);
+    setApiKeyState(k); setApiKeySource("runtime");
+  };
+  const handleClearApiKey = async () => {
+    await clearApiKey();
+    if (ENV_KEY) { setRuntimeApiKey(null); setApiKeyState(ENV_KEY); setApiKeySource("env"); }
+    else { setRuntimeApiKey(null); setApiKeyState(""); setApiKeySource("none"); }
+  };
+
+  const allTags = useMemo(() => [...new Set(papers.flatMap((p) => p.tags))].sort(), [papers]);
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
     return papers.filter((p) => {
-      const ms =
-        !q ||
-        p.title.toLowerCase().includes(q) ||
-        p.authors.toLowerCase().includes(q) ||
-        p.tags.some((t) => t.toLowerCase().includes(q)) ||
-        p.abstract.toLowerCase().includes(q);
+      const ms = !q || p.title.toLowerCase().includes(q) || p.authors.toLowerCase().includes(q) ||
+        p.tags.some((t) => t.toLowerCase().includes(q)) || p.abstract.toLowerCase().includes(q);
       const mt = !activeTag || p.tags.includes(activeTag);
       const mst = statusFilter === "all" || p.status === statusFilter;
       return ms && mt && mst;
     });
   }, [papers, search, activeTag, statusFilter]);
-
-  const statusColors = useMemo(
-    () => ({
-      "to-read": { bg: theme.chip, color: theme.textSubtle, label: "To read" },
-      reading: { bg: theme.accent + "22", color: theme.accent, label: "Reading" },
-      read: { bg: "#1a2418", color: "#6a9060", label: "Read" },
-    }),
-    [theme]
-  );
+  const statusColors = useMemo(() => ({
+    "to-read": { bg: theme.chip, color: theme.textSubtle, label: "To read" },
+    reading: { bg: theme.accent + "22", color: theme.accent, label: "Reading" },
+    read: { bg: "#1a2418", color: "#6a9060", label: "Read" },
+  }), [theme]);
 
   const updatePaper = (id, updates) => {
     setPapers((prev) => prev.map((p) => (p.id === id ? { ...p, ...updates } : p)));
     if (selected?.id === id) setSelected((prev) => ({ ...prev, ...updates }));
   };
+  const openPaper = (p) => { setSelected(p); setView("paper"); };
 
-  const openPaper = (p) => {
-    setSelected(p);
-    setView("paper");
-  };
-
-  // Streaming chat
   const sendChat = async (override) => {
     const msg = override || chatInput;
     if (!msg.trim()) return;
-    const userMsg = { role: "user", content: msg };
-    const newMsgs = [...messages, userMsg];
+    const newMsgs = [...messages, { role: "user", content: msg }];
     setMessages([...newMsgs, { role: "assistant", content: "", streaming: true }]);
-    setChatInput("");
-    setLoading(true);
-
-    const replaceLast = (updater) =>
-      setMessages((prev) => {
-        const out = prev.slice(0, -1);
-        out.push(updater(prev[prev.length - 1]));
-        return out;
-      });
-
+    setChatInput(""); setLoading(true);
+    const replaceLast = (updater) => setMessages((prev) => {
+      const out = prev.slice(0, -1);
+      out.push(updater(prev[prev.length - 1]));
+      return out;
+    });
     try {
-      await askLibraryStream(papers, newMsgs, (partial) => {
-        replaceLast((m) => ({ ...m, content: partial }));
-      });
+      await askLibraryStream(papers, newMsgs, (partial) => replaceLast((m) => ({ ...m, content: partial })));
       replaceLast((m) => ({ ...m, streaming: false }));
     } catch (err) {
-      replaceLast(() => ({
-        role: "assistant",
-        content: `Connection error: ${err.message}`,
-        streaming: false,
-      }));
-    } finally {
-      setLoading(false);
-    }
+      replaceLast(() => ({ role: "assistant", content: `Connection error: ${err.message}`, streaming: false }));
+    } finally { setLoading(false); }
   };
-
-  const askAIAboutPaper = (prompt) => {
-    setView("chat");
-    sendChat(prompt);
-  };
+  const askAIAboutPaper = (prompt) => { setView("chat"); sendChat(prompt); };
 
   const handlePdfUpload = async (file) => {
     if (!file) return;
-    if (file.type !== "application/pdf") {
-      setPdfStatus("Please upload a PDF file");
-      return;
-    }
-    setPdfLoading(true);
-    setPdfStatus("Reading PDF...");
+    if (file.type !== "application/pdf") { setPdfStatus("Please upload a PDF file"); return; }
+    setPdfLoading(true); setPdfStatus("Reading PDF...");
     try {
       const base64 = await readAsBase64(file);
       setPdfStatus("AI extracting metadata...");
       const parsed = await extractPaperFromPdf(base64);
-      const newPaper = {
-        id: `p${Date.now()}`,
-        ...parsed,
-        notes: "",
-        highlights: [],
-        status: "to-read",
-      };
+      const newPaper = { id: `p${Date.now()}`, ...parsed, notes: "", highlights: [], status: "to-read" };
       setPapers((prev) => [newPaper, ...prev]);
       setPdfStatus(`✓ Added "${parsed.title.slice(0, 40)}..."`);
-      setTimeout(() => {
-        setPdfStatus("");
-        setPdfLoading(false);
-      }, 2000);
+      setTimeout(() => { setPdfStatus(""); setPdfLoading(false); }, 2000);
     } catch (err) {
       setPdfStatus(`Error processing PDF: ${err.message}`);
       setPdfLoading(false);
@@ -244,13 +231,7 @@ export default function App() {
     if (papers.some((p) => p.doi && p.doi.toLowerCase() === meta.doi.toLowerCase())) {
       throw new Error("DOI already in your library");
     }
-    const newPaper = {
-      id: `p${Date.now()}`,
-      ...meta,
-      notes: "",
-      highlights: [],
-      status: "to-read",
-    };
+    const newPaper = { id: `p${Date.now()}`, ...meta, notes: "", highlights: [], status: "to-read" };
     setPapers((prev) => [newPaper, ...prev]);
     return newPaper;
   };
@@ -259,38 +240,23 @@ export default function App() {
     if (!papers.length) return;
     downloadString(`lectus-${todayStamp()}.bib`, papersToBibtex(papers), "application/x-bibtex;charset=utf-8");
   };
-
   const exportJson = () => {
-    const payload = {
-      app: "lectus",
-      version: 1,
-      exportedAt: new Date().toISOString(),
-      papers,
-    };
-    downloadString(
-      `lectus-backup-${todayStamp()}.json`,
-      JSON.stringify(payload, null, 2),
-      "application/json;charset=utf-8"
-    );
+    const payload = { app: "lectus", version: 1, exportedAt: new Date().toISOString(), papers };
+    downloadString(`lectus-backup-${todayStamp()}.json`, JSON.stringify(payload, null, 2), "application/json;charset=utf-8");
   };
 
   const mergePapers = (existing, incoming) => {
-    const byDoi = new Map();
-    const byTitle = new Map();
+    const byDoi = new Map(); const byTitle = new Map();
     for (const p of existing) {
       if (p.doi) byDoi.set(p.doi.toLowerCase(), true);
       if (p.title) byTitle.set(p.title.toLowerCase(), true);
     }
-    let added = 0;
-    let skipped = 0;
+    let added = 0, skipped = 0;
     const next = [...existing];
     for (const p of incoming) {
       const dKey = p.doi ? p.doi.toLowerCase() : null;
       const tKey = p.title ? p.title.toLowerCase() : null;
-      if ((dKey && byDoi.has(dKey)) || (tKey && byTitle.has(tKey))) {
-        skipped++;
-        continue;
-      }
+      if ((dKey && byDoi.has(dKey)) || (tKey && byTitle.has(tKey))) { skipped++; continue; }
       next.unshift(p);
       if (dKey) byDoi.set(dKey, true);
       if (tKey) byTitle.set(tKey, true);
@@ -298,7 +264,6 @@ export default function App() {
     }
     return { next, added, skipped };
   };
-
   const handleImportFile = async (file) => {
     const text = await readAsText(file);
     const lower = file.name.toLowerCase();
@@ -308,15 +273,11 @@ export default function App() {
       const list = Array.isArray(parsed) ? parsed : parsed.papers;
       if (!Array.isArray(list)) throw new Error("JSON has no `papers` array");
       incoming = list.map((p) => ({
-        notes: "",
-        highlights: [],
-        status: "to-read",
+        notes: "", highlights: [], status: "to-read",
         ...p,
         id: p.id || `p${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       }));
-    } else {
-      incoming = parseBibtex(text);
-    }
+    } else { incoming = parseBibtex(text); }
     const { next, added, skipped } = mergePapers(papers, incoming);
     setPapers(next);
     return { added, skipped };
@@ -324,38 +285,21 @@ export default function App() {
 
   const generateReview = async () => {
     if (reviewSelection.length < 2) return;
-    setReviewLoading(true);
-    setReviewError("");
-    setReviewOutput("");
-    setReviewStructured(null);
+    setReviewLoading(true); setReviewError(""); setReviewOutput(""); setReviewStructured(null);
     const sp = papers.filter((p) => reviewSelection.includes(p.id));
     try {
-      if (reviewMode === "structured") {
-        const parsed = await generateStructuredReview(sp, reviewTopic);
-        setReviewStructured(parsed);
-      } else {
-        const out = await generateReviewParagraph(sp, reviewTopic);
-        setReviewOutput(out);
-      }
-    } catch (err) {
-      setReviewError(`Could not generate review: ${err.message}`);
-    } finally {
-      setReviewLoading(false);
-    }
+      if (reviewMode === "structured") setReviewStructured(await generateStructuredReview(sp, reviewTopic));
+      else setReviewOutput(await generateReviewParagraph(sp, reviewTopic));
+    } catch (err) { setReviewError(`Could not generate review: ${err.message}`); }
+    finally { setReviewLoading(false); }
   };
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: theme.bg,
-        color: theme.text,
-        fontFamily: "'Instrument Sans', sans-serif",
-        display: "flex",
-        flexDirection: "column",
-        transition: "background .3s",
-      }}
-    >
+    <div style={{
+      minHeight: "100vh", background: theme.bg, color: theme.text,
+      fontFamily: "'Instrument Sans', sans-serif",
+      display: "flex", flexDirection: "column", transition: "background .3s",
+    }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Instrument+Sans:wght@400;500&display=swap');
         *{box-sizing:border-box;margin:0;padding:0}
@@ -370,93 +314,19 @@ export default function App() {
         @keyframes blink{0%,80%,100%{opacity:.15}40%{opacity:1}}
       `}</style>
 
-      <TopBar view={view} onChangeView={setView} theme={theme} />
+      <TopBar view={view} onChangeView={setView} saveState={saveState} theme={theme} />
 
-      {view === "library" && (
-        <LibraryView
-          papers={papers}
-          filtered={filtered}
-          search={search}
-          setSearch={setSearch}
-          activeTag={activeTag}
-          setActiveTag={setActiveTag}
-          statusFilter={statusFilter}
-          setStatusFilter={setStatusFilter}
-          allTags={allTags}
-          statusColors={statusColors}
-          onSelectPaper={openPaper}
-          theme={theme}
-        />
-      )}
-
+      {view === "library" && <LibraryView papers={papers} filtered={filtered} search={search} setSearch={setSearch} activeTag={activeTag} setActiveTag={setActiveTag} statusFilter={statusFilter} setStatusFilter={setStatusFilter} allTags={allTags} statusColors={statusColors} onSelectPaper={openPaper} theme={theme} />}
       {view === "graph" && <GraphView papers={papers} onSelectPaper={openPaper} theme={theme} />}
       {view === "timeline" && <TimelineView papers={papers} onSelectPaper={openPaper} theme={theme} />}
       {view === "compare" && <CompareView papers={papers} onSelectPaper={openPaper} theme={theme} />}
+      {view === "paper" && selected && <PaperDetail paper={selected} statusColors={statusColors} onUpdate={updatePaper} onBack={() => setView("library")} onAskAI={askAIAboutPaper} theme={theme} />}
+      {view === "chat" && <ChatView papers={papers} messages={messages} loading={loading} chatInput={chatInput} setChatInput={setChatInput} onSend={sendChat} hasKey={Boolean(apiKey)} onConnect={openOnboarding} theme={theme} />}
+      {view === "review" && <ReviewView papers={papers} reviewSelection={reviewSelection} setReviewSelection={setReviewSelection} reviewTopic={reviewTopic} setReviewTopic={setReviewTopic} reviewMode={reviewMode} setReviewMode={setReviewMode} reviewOutput={reviewOutput} reviewStructured={reviewStructured} reviewLoading={reviewLoading} reviewError={reviewError} onGenerate={generateReview} hasKey={Boolean(apiKey)} onConnect={openOnboarding} theme={theme} />}
+      {view === "add" && <AddView pdfLoading={pdfLoading} pdfStatus={pdfStatus} onPdfUpload={handlePdfUpload} onDoiLookup={handleDoiLookup} hasKey={Boolean(apiKey)} onConnect={openOnboarding} theme={theme} />}
+      {view === "settings" && <SettingsView themeKey={themeKey} setThemeKey={setThemeKey} accentColor={accentColor} setAccentColor={setAccentColor} papers={papers} apiKey={apiKey} apiKeySource={apiKeySource} onSaveApiKey={handleSaveApiKey} onClearApiKey={handleClearApiKey} onTestApiKey={testConnection} onExportBibtex={exportBibtex} onExportJson={exportJson} onImportFile={handleImportFile} theme={theme} />}
 
-      {view === "paper" && selected && (
-        <PaperDetail
-          paper={selected}
-          statusColors={statusColors}
-          onUpdate={updatePaper}
-          onBack={() => setView("library")}
-          onAskAI={askAIAboutPaper}
-          theme={theme}
-        />
-      )}
-
-      {view === "chat" && (
-        <ChatView
-          papers={papers}
-          messages={messages}
-          loading={loading}
-          chatInput={chatInput}
-          setChatInput={setChatInput}
-          onSend={sendChat}
-          theme={theme}
-        />
-      )}
-
-      {view === "review" && (
-        <ReviewView
-          papers={papers}
-          reviewSelection={reviewSelection}
-          setReviewSelection={setReviewSelection}
-          reviewTopic={reviewTopic}
-          setReviewTopic={setReviewTopic}
-          reviewMode={reviewMode}
-          setReviewMode={setReviewMode}
-          reviewOutput={reviewOutput}
-          reviewStructured={reviewStructured}
-          reviewLoading={reviewLoading}
-          reviewError={reviewError}
-          onGenerate={generateReview}
-          theme={theme}
-        />
-      )}
-
-      {view === "add" && (
-        <AddView
-          pdfLoading={pdfLoading}
-          pdfStatus={pdfStatus}
-          onPdfUpload={handlePdfUpload}
-          onDoiLookup={handleDoiLookup}
-          theme={theme}
-        />
-      )}
-
-      {view === "settings" && (
-        <SettingsView
-          themeKey={themeKey}
-          setThemeKey={setThemeKey}
-          accentColor={accentColor}
-          setAccentColor={setAccentColor}
-          papers={papers}
-          onExportBibtex={exportBibtex}
-          onExportJson={exportJson}
-          onImportFile={handleImportFile}
-          theme={theme}
-        />
-      )}
+      {showOnboarding && <Onboarding onSave={handleOnboardingSave} onSkip={dismissOnboarding} theme={theme} />}
     </div>
   );
 }

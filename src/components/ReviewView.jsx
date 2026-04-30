@@ -1,3 +1,5 @@
+import NoKeyBanner from "./NoKeyBanner";
+
 // Literature review generator. Two modes:
 //   • Paragraph  — a single 250-400 word narrative.
 //   • Structured — sectioned JSON synthesis (agreements / contradictions /
@@ -15,6 +17,8 @@ export default function ReviewView({
   reviewLoading,
   reviewError,
   onGenerate,
+  hasKey,
+  onConnect,
   theme,
 }) {
   const toggle = (id) =>
@@ -49,6 +53,12 @@ export default function ReviewView({
       <div style={{ fontSize: "0.78rem", color: theme.textMuted, marginBottom: "1.5rem" }}>
         Select papers, optionally focus a topic, get a publication-ready synthesis
       </div>
+
+      {!hasKey && (
+        <div style={{ marginBottom: "1rem" }}>
+          <NoKeyBanner onConnect={onConnect} theme={theme} />
+        </div>
+      )}
 
       {/* Mode toggle */}
       <div
