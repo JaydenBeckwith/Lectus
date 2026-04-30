@@ -1,7 +1,7 @@
 {
   "name": "lectus",
   "private": true,
-  "version": "0.6.0",
+  "version": "0.7.0",
   "type": "module",
   "description": "An AI-assisted research paper library for organising, visualising, and synthesising scientific literature.",
   "main": "electron/main.cjs",
@@ -14,14 +14,13 @@
     "electron:build": "vite build && electron-builder --win"
   },
   "dependencies": {
-    "@rollup/rollup-linux-x64-gnu": "^4.60.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-markdown": "^9.1.0",
-    "remark-gfm": "^4.0.1"
+    "react-markdown": "^9.0.1",
+    "remark-gfm": "^4.0.0"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^4.3.4",
+    "@vitejs/plugin-react-swc": "^3.7.2",
     "concurrently": "^9.1.0",
     "cross-env": "^7.0.3",
     "electron": "^33.2.1",
@@ -32,27 +31,9 @@
   "build": {
     "appId": "com.lectus.app",
     "productName": "Lectus",
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "dist/**/*",
-      "electron/**/*"
-    ],
-    "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
-      ]
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "perMachine": false
-    }
+    "directories": { "output": "release" },
+    "files": ["dist/**/*", "electron/**/*"],
+    "win": { "target": [{ "target": "nsis", "arch": ["x64"] }] },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "perMachine": false }
   }
 }
