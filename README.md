@@ -1,5 +1,5 @@
 # Lectus
-
+![Lectus Logo](public/lectus_logo.png)
 > _Lectus_ - Latin, "having been read."
 
 Researchers read dozens of papers, but struggle to remember key findings and how studies connect. Knowledge becomes fragmented, and valuable time is lost re-reading and piecing insights together.
