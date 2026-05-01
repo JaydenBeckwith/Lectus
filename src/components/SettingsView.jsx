@@ -6,7 +6,7 @@ const ACCENT_SWATCHES = ["#c8a96e","#8b5a2b","#5fb3c4","#8fb572","#c47a6e","#9c7
 export default function SettingsView({
   themeKey, setThemeKey, accentColor, setAccentColor, papers,
   apiKey, apiKeySource, onSaveApiKey, onClearApiKey, onTestApiKey,
-  onExportBibtex, onExportJson, onImportFile, theme,
+  onExportBibtex, onExportJson, onImportFile, onLoadExamples, theme,
 }) {
   const importRef = useRef(null);
   const [importStatus, setImportStatus] = useState("");
@@ -118,6 +118,18 @@ export default function SettingsView({
           <button onClick={onExportBibtex} style={{ background: theme.chip, border: `1px solid ${theme.chipBorder}`, color: theme.accent, borderRadius: 8, padding: "0.5rem 0.95rem", fontSize: "0.78rem", cursor: "pointer" }}>Export BibTeX</button>
           <button onClick={onExportJson} style={{ background: theme.chip, border: `1px solid ${theme.chipBorder}`, color: theme.accent, borderRadius: 8, padding: "0.5rem 0.95rem", fontSize: "0.78rem", cursor: "pointer" }}>Export JSON backup</button>
           <button onClick={() => importRef.current?.click()} style={{ background: "transparent", border: `1px solid ${theme.panelBorder}`, color: theme.textSubtle, borderRadius: 8, padding: "0.5rem 0.95rem", fontSize: "0.78rem", cursor: "pointer" }}>Import .bib or .json</button>
+          {onLoadExamples && (
+            <button
+              onClick={() => {
+                const added = onLoadExamples();
+                setImportStatus(`✓ Loaded ${added} example paper${added === 1 ? "" : "s"}`);
+                setTimeout(() => setImportStatus(""), 3000);
+              }}
+              style={{ background: "transparent", border: `1px solid ${theme.panelBorder}`, color: theme.textSubtle, borderRadius: 8, padding: "0.5rem 0.95rem", fontSize: "0.78rem", cursor: "pointer" }}
+            >
+              Load example library
+            </button>
+          )}
           <input ref={importRef} type="file" accept=".bib,.json,application/json,text/plain" onChange={handleImport} style={{ display: "none" }} />
         </div>
         {importStatus && <div style={{ fontSize: "0.75rem", color: tone(importStatus), marginTop: "0.6rem" }}>{importStatus}</div>}

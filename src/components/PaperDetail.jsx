@@ -7,6 +7,7 @@ export default function PaperDetail({
   paper,
   statusColors,
   onUpdate,
+  onDelete,
   onBack,
   onAskAI,
   theme,
@@ -309,26 +310,59 @@ export default function PaperDetail({
         )}
       </Section>
 
-      <button
-        onClick={() =>
-          onAskAI(
-            `Summarise the key findings of "${paper.title}" and how it connects to other papers in my library.${
-              paper.notes ? ` Also consider my notes: "${paper.notes}"` : ""
-            }`
-          )
-        }
-        style={{
-          background: theme.chip,
-          border: `1px solid ${theme.chipBorder}`,
-          color: theme.accent,
-          borderRadius: 8,
-          padding: "0.5rem 1rem",
-          fontSize: "0.75rem",
-          cursor: "pointer",
-        }}
-      >
-        Ask AI about this paper →
-      </button>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: "0.5rem", flexWrap: "wrap" }}>
+        <button
+          onClick={() =>
+            onAskAI(
+              `Summarise the key findings of "${paper.title}" and how it connects to other papers in my library.${
+                paper.notes ? ` Also consider my notes: "${paper.notes}"` : ""
+              }`
+            )
+          }
+          style={{
+            background: theme.chip,
+            border: `1px solid ${theme.chipBorder}`,
+            color: theme.accent,
+            borderRadius: 8,
+            padding: "0.5rem 1rem",
+            fontSize: "0.75rem",
+            cursor: "pointer",
+          }}
+        >
+          Ask AI about this paper →
+        </button>
+
+        {onDelete && (
+          <button
+            onClick={() => {
+              if (
+                window.confirm(
+                  `Delete "${paper.title}"?\n\nThis removes the paper, your notes, and your highlights from the library. This can't be undone unless you have a JSON backup.`
+                )
+              ) {
+                onDelete(paper.id);
+              }
+            }}
+            style={{
+              background: "transparent",
+              border: `1px solid #c47a6e55`,
+              color: "#c47a6e",
+              borderRadius: 8,
+              padding: "0.5rem 1rem",
+              fontSize: "0.75rem",
+              cursor: "pointer",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "#c47a6e22";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "transparent";
+            }}
+          >
+            Delete from library
+          </button>
+        )}
+      </div>
     </div>
   );
 }

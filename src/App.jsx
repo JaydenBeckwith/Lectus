@@ -59,7 +59,10 @@ export default function App() {
   const baseTheme = THEMES[themeKey];
   const theme = accentColor ? { ...baseTheme, accent: accentColor } : baseTheme;
 
-  const [papers, setPapers] = useState(SEED_PAPERS);
+  // Start empty. Users add papers via DOI / PDF / import / "Load example
+  // library" in Settings. Hydration below replaces this with whatever was
+  // last saved to IndexedDB (or the on-disk JSON backup in Electron).
+  const [papers, setPapers] = useState([]);
   const [view, setView] = useState("library");
   const [selected, setSelected] = useState(null);
   const [search, setSearch] = useState("");
@@ -186,6 +189,22 @@ export default function App() {
     if (selected?.id === id) setSelected((prev) => ({ ...prev, ...updates }));
   };
   const openPaper = (p) => { setSelected(p); setView("paper"); };
+
+  // Remove a paper from the library. PaperDetail confirms before calling
+  // this, so we just do the work and bounce back to the library list.
+  const deletePaper = (id) => {
+    setPapers((prev) => prev.filter((p) => p.id !== id));
+    if (selected?.id === id) setSelected(null);
+    setReviewSelection((prev) => prev.filter((x) => x !== id));
+    setView("library");
+  };
+
+  // Settings "Load example library" — appends the seed set with dedupe.
+  const loadExamples = () => {
+    const { next, added } = mergePapers(papers, SEED_PAPERS);
+    setPapers(next);
+    return added;
+  };
 
   const sendChat = async (override) => {
     const msg = override || chatInput;
@@ -320,11 +339,11 @@ export default function App() {
       {view === "graph" && <GraphView papers={papers} onSelectPaper={openPaper} theme={theme} />}
       {view === "timeline" && <TimelineView papers={papers} onSelectPaper={openPaper} theme={theme} />}
       {view === "compare" && <CompareView papers={papers} onSelectPaper={openPaper} theme={theme} />}
-      {view === "paper" && selected && <PaperDetail paper={selected} statusColors={statusColors} onUpdate={updatePaper} onBack={() => setView("library")} onAskAI={askAIAboutPaper} theme={theme} />}
+      {view === "paper" && selected && <PaperDetail paper={selected} statusColors={statusColors} onUpdate={updatePaper} onDelete={deletePaper} onBack={() => setView("library")} onAskAI={askAIAboutPaper} theme={theme} />}
       {view === "chat" && <ChatView papers={papers} messages={messages} loading={loading} chatInput={chatInput} setChatInput={setChatInput} onSend={sendChat} hasKey={Boolean(apiKey)} onConnect={openOnboarding} theme={theme} />}
       {view === "review" && <ReviewView papers={papers} reviewSelection={reviewSelection} setReviewSelection={setReviewSelection} reviewTopic={reviewTopic} setReviewTopic={setReviewTopic} reviewMode={reviewMode} setReviewMode={setReviewMode} reviewOutput={reviewOutput} reviewStructured={reviewStructured} reviewLoading={reviewLoading} reviewError={reviewError} onGenerate={generateReview} hasKey={Boolean(apiKey)} onConnect={openOnboarding} theme={theme} />}
       {view === "add" && <AddView pdfLoading={pdfLoading} pdfStatus={pdfStatus} onPdfUpload={handlePdfUpload} onDoiLookup={handleDoiLookup} hasKey={Boolean(apiKey)} onConnect={openOnboarding} theme={theme} />}
-      {view === "settings" && <SettingsView themeKey={themeKey} setThemeKey={setThemeKey} accentColor={accentColor} setAccentColor={setAccentColor} papers={papers} apiKey={apiKey} apiKeySource={apiKeySource} onSaveApiKey={handleSaveApiKey} onClearApiKey={handleClearApiKey} onTestApiKey={testConnection} onExportBibtex={exportBibtex} onExportJson={exportJson} onImportFile={handleImportFile} theme={theme} />}
+      {view === "settings" && <SettingsView themeKey={themeKey} setThemeKey={setThemeKey} accentColor={accentColor} setAccentColor={setAccentColor} papers={papers} apiKey={apiKey} apiKeySource={apiKeySource} onSaveApiKey={handleSaveApiKey} onClearApiKey={handleClearApiKey} onTestApiKey={testConnection} onExportBibtex={exportBibtex} onExportJson={exportJson} onImportFile={handleImportFile} onLoadExamples={loadExamples} theme={theme} />}
 
       {showOnboarding && <Onboarding onSave={handleOnboardingSave} onSkip={dismissOnboarding} theme={theme} />}
     </div>
