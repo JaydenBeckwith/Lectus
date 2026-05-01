@@ -1,4 +1,3 @@
-# Lectus
 ![Lectus Logo](public/lectus_logo.png)
 > _Lectus_ - Latin, "having been read."
 
