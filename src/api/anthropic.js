@@ -3,6 +3,7 @@ import {
   PDF_EXTRACT_PROMPT,
   reviewPrompt,
   structuredReviewPrompt,
+  tagSuggestionPrompt,
 } from "../constants/prompts";
 
 const ENDPOINT = "https://api.anthropic.com/v1/messages";
@@ -153,6 +154,31 @@ export const generateStructuredReview = async (papers, topic) => {
   });
   const raw = data.content?.[0]?.text || "";
   return extractJson(raw);
+};
+
+// Ask Claude for 4-6 tag suggestions for a paper. Returns a string array;
+// the caller filters out any duplicates of existing tags. Empty array if the
+// model returns garbage.
+export const suggestTags = async (paper, existing = []) => {
+  const data = await post({
+    model: MODEL,
+    max_tokens: 300,
+    messages: [{ role: "user", content: tagSuggestionPrompt(paper, existing) }],
+  });
+  const raw = (data.content?.[0]?.text || "").replace(/```json|```/g, "").trim();
+  const start = raw.indexOf("[");
+  const end = raw.lastIndexOf("]");
+  if (start === -1 || end === -1) return [];
+  try {
+    const arr = JSON.parse(raw.slice(start, end + 1));
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .filter((t) => typeof t === "string")
+      .map((t) => t.trim())
+      .filter((t) => t.length > 0 && t.length <= 40);
+  } catch {
+    return [];
+  }
 };
 
 export const testConnection = async () => {

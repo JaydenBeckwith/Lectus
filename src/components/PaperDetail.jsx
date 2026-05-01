@@ -10,6 +10,8 @@ export default function PaperDetail({
   onDelete,
   onBack,
   onAskAI,
+  onSuggestTags,
+  hasKey,
   theme,
 }) {
   const [editingNotes, setEditingNotes] = useState(false);
@@ -118,11 +120,13 @@ export default function PaperDetail({
         </span>
       </div>
 
-      {/* Tags — editable */}
+      {/* Tags — editable, with optional AI suggestion */}
       <div style={{ marginBottom: "1.25rem" }}>
         <TagEditor
           tags={paper.tags}
           onChange={(next) => onUpdate(paper.id, { tags: next })}
+          onSuggest={onSuggestTags ? () => onSuggestTags(paper) : undefined}
+          canSuggest={Boolean(hasKey)}
           theme={theme}
         />
       </div>
@@ -396,3 +400,4 @@ function Section({ title, right, children, theme }) {
     </div>
   );
 }
+
