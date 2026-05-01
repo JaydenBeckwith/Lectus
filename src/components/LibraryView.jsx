@@ -149,11 +149,35 @@ export default function LibraryView({
               style={{
                 color: theme.textMuted,
                 textAlign: "center",
-                paddingTop: "2rem",
+                paddingTop: "3rem",
                 fontSize: "0.85rem",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: "0.5rem",
               }}
             >
-              No papers found
+              {papers.length === 0 ? (
+                <>
+                  <div
+                    style={{
+                      fontFamily: "'Instrument Serif', serif",
+                      fontSize: "1.2rem",
+                      fontStyle: "italic",
+                      color: theme.textBright,
+                    }}
+                  >
+                    Your library is empty
+                  </div>
+                  <div style={{ maxWidth: 360, lineHeight: 1.6 }}>
+                    Add a paper from the <strong style={{ color: theme.accent }}>+ Add</strong> tab —
+                    paste a DOI for a free CrossRef lookup, or drop a PDF for AI extraction. You
+                    can also load a sample library from <strong style={{ color: theme.accent }}>Settings → Load example library</strong>.
+                  </div>
+                </>
+              ) : (
+                "No papers match your filters."
+              )}
             </div>
           )}
           {filtered.map((p) => {
