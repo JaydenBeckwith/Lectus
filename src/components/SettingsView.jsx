@@ -112,29 +112,6 @@ export default function SettingsView({
         </div>
       </div>
 
-      <div style={{ marginBottom: "2rem" }}>
-        <Label theme={theme}>Import / Export</Label>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", alignItems: "center" }}>
-          <button onClick={onExportBibtex} style={{ background: theme.chip, border: `1px solid ${theme.chipBorder}`, color: theme.accent, borderRadius: 8, padding: "0.5rem 0.95rem", fontSize: "0.78rem", cursor: "pointer" }}>Export BibTeX</button>
-          <button onClick={onExportJson} style={{ background: theme.chip, border: `1px solid ${theme.chipBorder}`, color: theme.accent, borderRadius: 8, padding: "0.5rem 0.95rem", fontSize: "0.78rem", cursor: "pointer" }}>Export JSON backup</button>
-          <button onClick={() => importRef.current?.click()} style={{ background: "transparent", border: `1px solid ${theme.panelBorder}`, color: theme.textSubtle, borderRadius: 8, padding: "0.5rem 0.95rem", fontSize: "0.78rem", cursor: "pointer" }}>Import .bib or .json</button>
-          {onLoadExamples && (
-            <button
-              onClick={() => {
-                const added = onLoadExamples();
-                setImportStatus(`✓ Loaded ${added} example paper${added === 1 ? "" : "s"}`);
-                setTimeout(() => setImportStatus(""), 3000);
-              }}
-              style={{ background: "transparent", border: `1px solid ${theme.panelBorder}`, color: theme.textSubtle, borderRadius: 8, padding: "0.5rem 0.95rem", fontSize: "0.78rem", cursor: "pointer" }}
-            >
-              Load example library
-            </button>
-          )}
-          <input ref={importRef} type="file" accept=".bib,.json,application/json,text/plain" onChange={handleImport} style={{ display: "none" }} />
-        </div>
-        {importStatus && <div style={{ fontSize: "0.75rem", color: tone(importStatus), marginTop: "0.6rem" }}>{importStatus}</div>}
-      </div>
-
       <div style={{ marginBottom: "2rem", background: theme.panel, border: `1px solid ${theme.panelBorder}`, borderRadius: 10, padding: "1rem 1.25rem" }}>
         <Label theme={theme}>Library Stats</Label>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: "1rem" }}>
