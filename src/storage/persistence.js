@@ -1,20 +1,13 @@
-// ── High-level persistence helpers ────────────────────────────────────────────
-// Thin shims on top of the KV store that name what each slice of state means.
-// Bumping SCHEMA_VERSION lets us migrate older saves later if the paper shape
-// ever changes; for now we just compare and discard mismatches.
-
 import { getKV, setKV } from "./db";
 
 const SCHEMA_VERSION = 1;
-
 const KEY_PAPERS = "papers";
 const KEY_PREFS = "prefs";
+const KEY_PROJECTS = "projects";
 
 export const loadPapers = async () => {
   const stored = await getKV(KEY_PAPERS);
-  if (!stored || stored.version !== SCHEMA_VERSION || !Array.isArray(stored.papers)) {
-    return null;
-  }
+  if (!stored || stored.version !== SCHEMA_VERSION || !Array.isArray(stored.papers)) return null;
   return stored.papers;
 };
 
@@ -28,3 +21,15 @@ export const loadPrefs = async () => {
 };
 
 export const savePrefs = (prefs) => setKV(KEY_PREFS, prefs);
+
+// Projects = EndNote-style groups. Each project is { id, name, createdAt }.
+// Per-paper membership lives on the paper itself (paper.projects: string[])
+// so a paper can belong to multiple projects without duplication.
+export const loadProjects = async () => {
+  const stored = await getKV(KEY_PROJECTS);
+  if (!stored || stored.version !== SCHEMA_VERSION || !Array.isArray(stored.projects)) return null;
+  return stored.projects;
+};
+
+export const saveProjects = (projects) =>
+  setKV(KEY_PROJECTS, { version: SCHEMA_VERSION, projects });
