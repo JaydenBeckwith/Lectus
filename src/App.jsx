@@ -12,7 +12,7 @@ import {
   testConnection,
 } from "./api/anthropic";
 import { lookupDoi } from "./api/crossref";
-import { loadPapers, savePapers, loadPrefs, savePrefs } from "./storage/persistence";
+import { loadPapers, savePapers, loadPrefs, savePrefs, loadProjects, saveProjects } from "./storage/persistence";
 import { getApiKey, setApiKey, clearApiKey } from "./storage/secrets";
 import { isElectron, saveLibraryToFile, loadLibraryFromFile } from "./storage/electronFile";
 import useDebouncedEffect from "./hooks/useDebouncedEffect";
@@ -89,6 +89,12 @@ export default function App() {
   const [pdfLoading, setPdfLoading] = useState(false);
   const [pdfStatus, setPdfStatus] = useState("");
 
+  // Projects (EndNote-style groups). Each project: { id, name, createdAt }.
+  // Per-paper membership lives on paper.projects (array of project ids).
+  // activeProjectId === null means "All papers" (no filter).
+  const [projects, setProjects] = useState([]);
+  const [activeProjectId, setActiveProjectId] = useState(null);
+
   const [reviewSelection, setReviewSelection] = useState([]);
   const [reviewMode, setReviewMode] = useState("paragraph");
   const [reviewOutput, setReviewOutput] = useState("");
@@ -100,7 +106,7 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [storedPapers, storedPrefs, storedKey] = await Promise.all([loadPapers(), loadPrefs(), getApiKey()]);
+      const [storedPapers, storedPrefs, storedKey, storedProjects] = await Promise.all([loadPapers(), loadPrefs(), getApiKey(), loadProjects()]);
       if (cancelled) return;
       skipNextSave.current = true;
       let papersToUse = storedPapers;
@@ -109,10 +115,12 @@ export default function App() {
         if (fromFile?.length) papersToUse = fromFile;
       }
       if (papersToUse) setPapers(papersToUse);
+      if (storedProjects) setProjects(storedProjects);
       if (storedPrefs) {
         if (storedPrefs.themeKey && THEMES[storedPrefs.themeKey]) setThemeKey(storedPrefs.themeKey);
         if (storedPrefs.accentColor !== undefined) setAccentColor(storedPrefs.accentColor);
         if (storedPrefs.onboardingSeen) setOnboardingSeen(true);
+        if (storedPrefs.activeProjectId !== undefined) setActiveProjectId(storedPrefs.activeProjectId);
       }
       if (storedKey) {
         setRuntimeApiKey(storedKey);
@@ -147,8 +155,13 @@ export default function App() {
 
   useDebouncedEffect(() => {
     if (!hydrated) return;
-    savePrefs({ themeKey, accentColor, onboardingSeen });
-  }, [themeKey, accentColor, onboardingSeen, hydrated], 250);
+    savePrefs({ themeKey, accentColor, onboardingSeen, activeProjectId });
+  }, [themeKey, accentColor, onboardingSeen, activeProjectId, hydrated], 250);
+
+  useDebouncedEffect(() => {
+    if (!hydrated) return;
+    saveProjects(projects);
+  }, [projects, hydrated], 300);
 
   const openOnboarding = () => setShowOnboarding(true);
   const dismissOnboarding = () => { setShowOnboarding(false); setOnboardingSeen(true); };
@@ -176,9 +189,10 @@ export default function App() {
         p.tags.some((t) => t.toLowerCase().includes(q)) || p.abstract.toLowerCase().includes(q);
       const mt = !activeTag || p.tags.includes(activeTag);
       const mst = statusFilter === "all" || p.status === statusFilter;
-      return ms && mt && mst;
+      const mp = !activeProjectId || (p.projects || []).includes(activeProjectId);
+      return ms && mt && mst && mp;
     });
-  }, [papers, search, activeTag, statusFilter]);
+  }, [papers, search, activeTag, statusFilter, activeProjectId]);
   const statusColors = useMemo(() => ({
     "to-read": { bg: theme.chip, color: theme.textSubtle, label: "To read" },
     reading: { bg: theme.accent + "22", color: theme.accent, label: "Reading" },
@@ -190,6 +204,50 @@ export default function App() {
     if (selected?.id === id) setSelected((prev) => ({ ...prev, ...updates }));
   };
   const openPaper = (p) => { setSelected(p); setView("paper"); };
+
+  // ── Project CRUD ────────────────────────────────────────────────────────
+  // New papers added while a project is active auto-join it (EndNote default).
+  const projectStamp = () => activeProjectId ? [activeProjectId] : [];
+
+  const createProject = (rawName) => {
+    const name = (rawName || "").trim();
+    if (!name) return null;
+    const id = "pr_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const next = [...projects, { id, name, createdAt: new Date().toISOString() }];
+    setProjects(next);
+    setActiveProjectId(id);
+    return id;
+  };
+
+  const renameProject = (id, name) => {
+    const trimmed = (name || "").trim();
+    if (!trimmed) return;
+    setProjects((prev) => prev.map((p) => (p.id === id ? { ...p, name: trimmed } : p)));
+  };
+
+  const deleteProject = (id) => {
+    setProjects((prev) => prev.filter((p) => p.id !== id));
+    setPapers((prev) => prev.map((p) => ({ ...p, projects: (p.projects || []).filter((x) => x !== id) })));
+    if (activeProjectId === id) setActiveProjectId(null);
+  };
+
+  const togglePaperInProject = (paperId, projectId) => {
+    setPapers((prev) => prev.map((p) => {
+      if (p.id !== paperId) return p;
+      const ids = new Set(p.projects || []);
+      if (ids.has(projectId)) ids.delete(projectId);
+      else ids.add(projectId);
+      return { ...p, projects: Array.from(ids) };
+    }));
+    if (selected?.id === paperId) {
+      setSelected((prev) => {
+        const ids = new Set(prev.projects || []);
+        if (ids.has(projectId)) ids.delete(projectId);
+        else ids.add(projectId);
+        return { ...prev, projects: Array.from(ids) };
+      });
+    }
+  };
 
   // Remove a paper from the library. PaperDetail confirms before calling
   // this, so we just do the work and bounce back to the library list.
@@ -336,11 +394,11 @@ export default function App() {
 
       <TopBar view={view} onChangeView={setView} saveState={saveState} theme={theme} />
 
-      {view === "library" && <LibraryView papers={papers} filtered={filtered} search={search} setSearch={setSearch} activeTag={activeTag} setActiveTag={setActiveTag} statusFilter={statusFilter} setStatusFilter={setStatusFilter} allTags={allTags} statusColors={statusColors} onSelectPaper={openPaper} onExportBibtex={exportBibtex} onExportJson={exportJson} onImportFile={handleImportFile} onLoadExamples={loadExamples} theme={theme} />}
+      {view === "library" && <LibraryView papers={papers} filtered={filtered} search={search} setSearch={setSearch} activeTag={activeTag} setActiveTag={setActiveTag} statusFilter={statusFilter} setStatusFilter={setStatusFilter} allTags={allTags} statusColors={statusColors} onSelectPaper={openPaper} projects={projects} activeProjectId={activeProjectId} setActiveProjectId={setActiveProjectId} onCreateProject={createProject} onRenameProject={renameProject} onDeleteProject={deleteProject} onExportBibtex={exportBibtex} onExportJson={exportJson} onImportFile={handleImportFile} onLoadExamples={loadExamples} theme={theme} />}
       {view === "graph" && <GraphView papers={papers} onSelectPaper={openPaper} theme={theme} />}
       {view === "timeline" && <TimelineView papers={papers} onSelectPaper={openPaper} theme={theme} />}
       {view === "compare" && <CompareView papers={papers} onSelectPaper={openPaper} theme={theme} />}
-      {view === "paper" && selected && <PaperDetail paper={selected} statusColors={statusColors} onUpdate={updatePaper} onDelete={deletePaper} onBack={() => setView("library")} onAskAI={askAIAboutPaper} onSuggestTags={(p) => suggestTags(p, p.tags)} hasKey={Boolean(apiKey)} theme={theme} />}
+      {view === "paper" && selected && <PaperDetail paper={selected} statusColors={statusColors} onUpdate={updatePaper} onDelete={deletePaper} onBack={() => setView("library")} onAskAI={askAIAboutPaper} onSuggestTags={(p) => suggestTags(p, p.tags)} hasKey={Boolean(apiKey)} projects={projects} onToggleProject={togglePaperInProject} theme={theme} />}
       {view === "chat" && <ChatView papers={papers} messages={messages} loading={loading} chatInput={chatInput} setChatInput={setChatInput} onSend={sendChat} hasKey={Boolean(apiKey)} onConnect={openOnboarding} theme={theme} />}
       {view === "review" && <ReviewView papers={papers} reviewSelection={reviewSelection} setReviewSelection={setReviewSelection} reviewTopic={reviewTopic} setReviewTopic={setReviewTopic} reviewMode={reviewMode} setReviewMode={setReviewMode} reviewOutput={reviewOutput} reviewStructured={reviewStructured} reviewLoading={reviewLoading} reviewError={reviewError} onGenerate={generateReview} hasKey={Boolean(apiKey)} onConnect={openOnboarding} theme={theme} />}
       {view === "add" && <AddView pdfLoading={pdfLoading} pdfStatus={pdfStatus} onPdfUpload={handlePdfUpload} onDoiLookup={handleDoiLookup} hasKey={Boolean(apiKey)} onConnect={openOnboarding} theme={theme} />}
