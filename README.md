@@ -19,7 +19,7 @@ Lectus is a local-first desktop research assistant - your papers, notes, and API
 - **Review** generate a literature-review paragraph or a structured synthesis (agreements / contradictions / gaps / future directions / per-paper contributions).
 - **Add** drop a PDF, AI extracts title, authors, journal, year, DOI, tags, abstract, and key findings.
 - **Persistent local storage** papers, notes, highlights, and theme preferences are saved to IndexedDB and survive refreshes.
-- **Desktop app** runs as a packaged Windows `.exe` via Electron, fully local — no browser required.
+- **Desktop app** runs as a packaged Windows `.exe` via Electron, fully local - no browser required.
 - **Themes** Midnight, Parchment, Ocean, Forest. Custom accent colour.
 
 
@@ -42,6 +42,7 @@ All AI usage is optional and configurable in the settings.
 
 Lectus combines structured data + AI:
 
+```
 PDF → metadata extraction → structured library
                            ↓
                      user query
@@ -49,6 +50,7 @@ PDF → metadata extraction → structured library
                  relevant context
                            ↓
                       AI response
+```
 
 This enables:
 - fast paper recall
