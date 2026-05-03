@@ -12,6 +12,8 @@ export default function PaperDetail({
   onAskAI,
   onSuggestTags,
   hasKey,
+  projects = [],
+  onToggleProject,
   theme,
 }) {
   const [editingNotes, setEditingNotes] = useState(false);
@@ -130,6 +132,41 @@ export default function PaperDetail({
           theme={theme}
         />
       </div>
+
+      {/* Projects — toggle membership across one or more projects */}
+      {projects.length > 0 && onToggleProject && (
+        <div style={{ marginBottom: "1.25rem" }}>
+          <div style={{ fontSize: "0.62rem", color: theme.textMuted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "0.4rem" }}>Projects</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem" }}>
+            {projects.map((proj) => {
+              const inProj = (paper.projects || []).includes(proj.id);
+              return (
+                <button
+                  key={proj.id}
+                  onClick={() => onToggleProject(paper.id, proj.id)}
+                  title={inProj ? "Remove from " + proj.name : "Add to " + proj.name}
+                  style={{
+                    background: inProj ? theme.accent + "22" : "transparent",
+                    border: "1px solid " + (inProj ? theme.accent : theme.panelBorder),
+                    color: inProj ? theme.accent : theme.textSubtle,
+                    borderRadius: 14,
+                    padding: "0.22rem 0.7rem",
+                    fontSize: "0.7rem",
+                    cursor: "pointer",
+                    transition: "all .15s",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "0.3rem",
+                  }}
+                >
+                  {inProj && <span style={{ fontSize: "0.7rem" }}>✓</span>}
+                  {proj.name}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <Section title="Abstract" theme={theme}>
         <div style={{ fontSize: "0.83rem", lineHeight: 1.7, color: theme.text }}>{paper.abstract}</div>
@@ -400,4 +437,3 @@ function Section({ title, right, children, theme }) {
     </div>
   );
 }
-

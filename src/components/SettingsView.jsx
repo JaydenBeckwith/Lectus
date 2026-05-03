@@ -6,6 +6,7 @@ const ACCENT_SWATCHES = ["#c8a96e","#8b5a2b","#5fb3c4","#8fb572","#c47a6e","#9c7
 export default function SettingsView({
   themeKey, setThemeKey, accentColor, setAccentColor, papers,
   apiKey, apiKeySource, onSaveApiKey, onClearApiKey, onTestApiKey,
+  provider = "puter", onSetProvider, puterModel = "gpt-5-nano", onSetPuterModel, puterModels = [],
   onExportBibtex, onExportJson, onImportFile, onLoadExamples, theme,
 }) {
   const importRef = useRef(null);
@@ -54,9 +55,58 @@ export default function SettingsView({
       <div style={{ fontFamily: "'Instrument Serif', serif", fontSize: "1.6rem", fontStyle: "italic", color: theme.textBright, marginBottom: "0.3rem" }}>Settings</div>
       <div style={{ fontSize: "0.78rem", color: theme.textMuted, marginBottom: "2rem" }}>Configure your Anthropic key, customise how Lectus looks, and back up your library</div>
 
-      <div style={{ marginBottom: "2rem", background: theme.panel, border: `1px solid ${theme.panelBorder}`, borderRadius: 10, padding: "1.1rem 1.25rem" }}>
+      {/* AI provider selector — Puter (free) is the default */}
+      <div style={{ marginBottom: "1.25rem", background: theme.panel, border: "1px solid " + theme.panelBorder, borderRadius: 10, padding: "1.1rem 1.25rem" }}>
+        <Label theme={theme}>AI provider</Label>
+        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.7rem" }}>
+          {[
+            ["puter", "Puter.js", "free, no key needed"],
+            ["anthropic", "Anthropic", "your own API key"],
+          ].map(([id, label, hint]) => {
+            const active = provider === id;
+            return (
+              <button
+                key={id}
+                onClick={() => onSetProvider && onSetProvider(id)}
+                style={{
+                  flex: 1, minWidth: 160,
+                  background: active ? theme.accent + "22" : "transparent",
+                  border: "1px solid " + (active ? theme.accent : theme.panelBorder),
+                  color: active ? theme.accent : theme.textSubtle,
+                  borderRadius: 8, padding: "0.55rem 0.8rem",
+                  fontSize: "0.8rem", cursor: "pointer", textAlign: "left",
+                }}
+              >
+                <div style={{ fontWeight: 500 }}>{active && "✓ "}{label}</div>
+                <div style={{ fontSize: "0.65rem", color: theme.textMuted, marginTop: "0.15rem" }}>{hint}</div>
+              </button>
+            );
+          })}
+        </div>
+
+        {provider === "puter" && (
+          <>
+            <Label theme={theme}>Puter model</Label>
+            <select
+              value={puterModel}
+              onChange={(e) => onSetPuterModel && onSetPuterModel(e.target.value)}
+              style={{ width: "100%", background: theme.inputBg, border: "1px solid " + theme.inputBorder, borderRadius: 8, padding: "0.5rem 0.7rem", color: theme.text, fontSize: "0.82rem" }}
+            >
+              {puterModels.map((m) => (
+                <option key={m.id} value={m.id} style={{ background: theme.bg }}>{m.label}</option>
+              ))}
+            </select>
+            <div style={{ fontSize: "0.68rem", color: theme.textMuted, marginTop: "0.55rem", lineHeight: 1.55 }}>
+              Puter.js routes requests through <a href="https://puter.com" target="_blank" rel="noopener noreferrer" style={{ color: theme.accent, textDecoration: "underline" }}>puter.com</a>. PDF extraction still requires switching to Anthropic.
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Anthropic API key card — only required when provider === "anthropic" */}
+      <div style={{ marginBottom: "2rem", background: theme.panel, border: "1px solid " + theme.panelBorder, borderRadius: 10, padding: "1.1rem 1.25rem", opacity: provider === "anthropic" ? 1 : 0.7 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.8rem" }}>
-          <Label theme={theme} flush>Anthropic API key</Label>
+          <Label theme={theme} flush>Anthropic API key {provider === "puter" && <span style={{ color: theme.textMuted, fontSize: "0.6rem", marginLeft: "0.4rem" }}>optional</span>}</Label>
           <KeyPill apiKey={apiKey} source={apiKeySource} theme={theme} />
         </div>
         <div style={{ display: "flex", gap: "0.5rem" }}>
