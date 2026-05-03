@@ -24,39 +24,44 @@ Lectus is a local-first desktop research assistant - your papers, notes, and API
 - **Themes** Midnight, Parchment, Ocean, Forest. Custom accent colour.
 
 
-## Coming Soon
+## AI Providers
 
-- **Backend proxy for AI**  
-  Secure API layer to remove client-side keys and enable production deployment.
-- **User profiles**  
-  Separate libraries, notes, and API keys for different users.
-- **Cloud sync (optional)**  
-  Sync your library across devices while keeping a local-first workflow.
-- **Domain-specific intelligence (biomedical focus)**  
-  Smarter synthesis for oncology, genomics, and translational research.
+Lectus supports multiple AI backends. It uses a built-in free provider via **Puter.js** to start asking questions immediately, so there's no API key needed.
+
+### Bring your own API key (recommended)
+For higher performance and reliability, connect your own provider:
+
+- Anthropic (Claude)
+- OpenAI (coming soon)
+- Additional providers (planned)
+
+All AI usage is optional and configurable in the settings.
+
+
+
+## How it works
+
+Lectus combines structured data + AI:
+
+PDF → metadata extraction → structured library
+                           ↓
+                     user query
+                           ↓
+                 relevant context
+                           ↓
+                      AI response
+
+This enables:
+- fast paper recall
+- cross-paper synthesis
+- structured literature reviews
 
 ## Quick start
 
 ```bash
 npm install
-cp .env.example .env
 npm run dev
 ```
-### example API load
-```env
-## in .env.example 
-VITE_ANTHROPIC_API_KEY=your_api_key_here
-```
-
-Open http://localhost:5173.
-
-## Environment variables
-
-| Variable                   | Purpose                                         |
-| -------------------------- | ----------------------------------------------- |
-| `VITE_ANTHROPIC_API_KEY`   | Anthropic API key used by all AI features.      |
-
-> **Security note.** Anything prefixed with `VITE_` is bundled into the client JavaScript and visible to anyone who opens devtools. This setup is intended for **local development only**. Before deploying anywhere public, route the Anthropic calls through a server-side proxy and remove the key from the client.
 
 ## Project structure
 

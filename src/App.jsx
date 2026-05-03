@@ -8,9 +8,15 @@ import {
   generateReviewParagraph,
   generateStructuredReview,
   setRuntimeApiKey,
+  setProvider,
+  setPuterModel,
+  getProvider,
+  hasAccess,
+  hasAnthropicKey,
   suggestTags,
   testConnection,
-} from "./api/anthropic";
+  PUTER_MODELS,
+} from "./api/llm";
 import { lookupDoi } from "./api/crossref";
 import { loadPapers, savePapers, loadPrefs, savePrefs, loadProjects, saveProjects } from "./storage/persistence";
 import { getApiKey, setApiKey, clearApiKey } from "./storage/secrets";
@@ -76,6 +82,11 @@ export default function App() {
   const [apiKey, setApiKeyState] = useState("");
   const [apiKeySource, setApiKeySource] = useState("none");
 
+  // AI provider: "puter" (free, no key) or "anthropic" (user's own key).
+  // Puter is the default so the app works for everyone out of the box.
+  const [providerState, setProviderState] = useState("puter");
+  const [puterModelState, setPuterModelState] = useState("gpt-5-nano");
+
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingSeen, setOnboardingSeen] = useState(false);
 
@@ -121,6 +132,14 @@ export default function App() {
         if (storedPrefs.accentColor !== undefined) setAccentColor(storedPrefs.accentColor);
         if (storedPrefs.onboardingSeen) setOnboardingSeen(true);
         if (storedPrefs.activeProjectId !== undefined) setActiveProjectId(storedPrefs.activeProjectId);
+        if (storedPrefs.provider === "anthropic" || storedPrefs.provider === "puter") {
+          setProviderState(storedPrefs.provider);
+          setProvider(storedPrefs.provider);
+        }
+        if (storedPrefs.puterModel) {
+          setPuterModelState(storedPrefs.puterModel);
+          setPuterModel(storedPrefs.puterModel);
+        }
       }
       if (storedKey) {
         setRuntimeApiKey(storedKey);
@@ -155,8 +174,8 @@ export default function App() {
 
   useDebouncedEffect(() => {
     if (!hydrated) return;
-    savePrefs({ themeKey, accentColor, onboardingSeen, activeProjectId });
-  }, [themeKey, accentColor, onboardingSeen, activeProjectId, hydrated], 250);
+    savePrefs({ themeKey, accentColor, onboardingSeen, activeProjectId, provider: providerState, puterModel: puterModelState });
+  }, [themeKey, accentColor, onboardingSeen, activeProjectId, providerState, puterModelState, hydrated], 250);
 
   useDebouncedEffect(() => {
     if (!hydrated) return;
@@ -179,6 +198,15 @@ export default function App() {
     await clearApiKey();
     if (ENV_KEY) { setRuntimeApiKey(null); setApiKeyState(ENV_KEY); setApiKeySource("env"); }
     else { setRuntimeApiKey(null); setApiKeyState(""); setApiKeySource("none"); }
+  };
+
+  const handleSetProvider = (p) => {
+    setProviderState(p);
+    setProvider(p);
+  };
+  const handleSetPuterModel = (m) => {
+    setPuterModelState(m);
+    setPuterModel(m);
   };
 
   const allTags = useMemo(() => [...new Set(papers.flatMap((p) => p.tags))].sort(), [papers]);
@@ -293,7 +321,7 @@ export default function App() {
       const base64 = await readAsBase64(file);
       setPdfStatus("AI extracting metadata...");
       const parsed = await extractPaperFromPdf(base64);
-      const newPaper = { id: `p${Date.now()}`, ...parsed, notes: "", highlights: [], status: "to-read" };
+      const newPaper = { id: `p${Date.now()}`, ...parsed, notes: "", highlights: [], status: "to-read", projects: projectStamp() };
       setPapers((prev) => [newPaper, ...prev]);
       setPdfStatus(`✓ Added "${parsed.title.slice(0, 40)}..."`);
       setTimeout(() => { setPdfStatus(""); setPdfLoading(false); }, 2000);
@@ -309,7 +337,7 @@ export default function App() {
     if (papers.some((p) => p.doi && p.doi.toLowerCase() === meta.doi.toLowerCase())) {
       throw new Error("DOI already in your library");
     }
-    const newPaper = { id: `p${Date.now()}`, ...meta, notes: "", highlights: [], status: "to-read" };
+    const newPaper = { id: `p${Date.now()}`, ...meta, notes: "", highlights: [], status: "to-read", projects: projectStamp() };
     setPapers((prev) => [newPaper, ...prev]);
     return newPaper;
   };
@@ -398,11 +426,11 @@ export default function App() {
       {view === "graph" && <GraphView papers={papers} onSelectPaper={openPaper} theme={theme} />}
       {view === "timeline" && <TimelineView papers={papers} onSelectPaper={openPaper} theme={theme} />}
       {view === "compare" && <CompareView papers={papers} onSelectPaper={openPaper} theme={theme} />}
-      {view === "paper" && selected && <PaperDetail paper={selected} statusColors={statusColors} onUpdate={updatePaper} onDelete={deletePaper} onBack={() => setView("library")} onAskAI={askAIAboutPaper} onSuggestTags={(p) => suggestTags(p, p.tags)} hasKey={Boolean(apiKey)} projects={projects} onToggleProject={togglePaperInProject} theme={theme} />}
-      {view === "chat" && <ChatView papers={papers} messages={messages} loading={loading} chatInput={chatInput} setChatInput={setChatInput} onSend={sendChat} hasKey={Boolean(apiKey)} onConnect={openOnboarding} theme={theme} />}
-      {view === "review" && <ReviewView papers={papers} reviewSelection={reviewSelection} setReviewSelection={setReviewSelection} reviewTopic={reviewTopic} setReviewTopic={setReviewTopic} reviewMode={reviewMode} setReviewMode={setReviewMode} reviewOutput={reviewOutput} reviewStructured={reviewStructured} reviewLoading={reviewLoading} reviewError={reviewError} onGenerate={generateReview} hasKey={Boolean(apiKey)} onConnect={openOnboarding} theme={theme} />}
-      {view === "add" && <AddView pdfLoading={pdfLoading} pdfStatus={pdfStatus} onPdfUpload={handlePdfUpload} onDoiLookup={handleDoiLookup} hasKey={Boolean(apiKey)} onConnect={openOnboarding} theme={theme} />}
-      {view === "settings" && <SettingsView themeKey={themeKey} setThemeKey={setThemeKey} accentColor={accentColor} setAccentColor={setAccentColor} papers={papers} apiKey={apiKey} apiKeySource={apiKeySource} onSaveApiKey={handleSaveApiKey} onClearApiKey={handleClearApiKey} onTestApiKey={testConnection} onExportBibtex={exportBibtex} onExportJson={exportJson} onImportFile={handleImportFile} onLoadExamples={loadExamples} theme={theme} />}
+      {view === "paper" && selected && <PaperDetail paper={selected} statusColors={statusColors} onUpdate={updatePaper} onDelete={deletePaper} onBack={() => setView("library")} onAskAI={askAIAboutPaper} onSuggestTags={(p) => suggestTags(p, p.tags)} hasKey={providerState === "puter" || Boolean(apiKey)} projects={projects} onToggleProject={togglePaperInProject} theme={theme} />}
+      {view === "chat" && <ChatView papers={papers} messages={messages} loading={loading} chatInput={chatInput} setChatInput={setChatInput} onSend={sendChat} hasKey={providerState === "puter" || Boolean(apiKey)} onConnect={openOnboarding} theme={theme} />}
+      {view === "review" && <ReviewView papers={papers} reviewSelection={reviewSelection} setReviewSelection={setReviewSelection} reviewTopic={reviewTopic} setReviewTopic={setReviewTopic} reviewMode={reviewMode} setReviewMode={setReviewMode} reviewOutput={reviewOutput} reviewStructured={reviewStructured} reviewLoading={reviewLoading} reviewError={reviewError} onGenerate={generateReview} hasKey={providerState === "puter" || Boolean(apiKey)} onConnect={openOnboarding} theme={theme} />}
+      {view === "add" && <AddView pdfLoading={pdfLoading} pdfStatus={pdfStatus} onPdfUpload={handlePdfUpload} onDoiLookup={handleDoiLookup} hasKey={providerState === "puter" || Boolean(apiKey)} onConnect={openOnboarding} theme={theme} />}
+      {view === "settings" && <SettingsView themeKey={themeKey} setThemeKey={setThemeKey} accentColor={accentColor} setAccentColor={setAccentColor} papers={papers} apiKey={apiKey} apiKeySource={apiKeySource} onSaveApiKey={handleSaveApiKey} onClearApiKey={handleClearApiKey} onTestApiKey={testConnection} provider={providerState} onSetProvider={handleSetProvider} puterModel={puterModelState} onSetPuterModel={handleSetPuterModel} puterModels={PUTER_MODELS} onExportBibtex={exportBibtex} onExportJson={exportJson} onImportFile={handleImportFile} onLoadExamples={loadExamples} theme={theme} />}
 
       {showOnboarding && <Onboarding onSave={handleOnboardingSave} onSkip={dismissOnboarding} theme={theme} />}
     </div>
