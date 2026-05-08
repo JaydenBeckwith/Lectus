@@ -15,10 +15,10 @@ Lectus is a local-first desktop research assistant - your papers, notes, and API
 - **Library** searchable, taggable list of papers with read/reading/to-read status, personal notes, and quote highlights.
 - **Graph** force-directed network of papers connected by shared tags.
 - **Timeline** chronological view grouped by publication year.
-- **Compare** side-by-side comparison of 2-4 papers across abstract, key findings, tags, highlights, and notes.
+- **Compare** side-by-side comparison of 2-4 papers across abstract, methods, results, discussion, key findings, tags, highlights, and notes — with an on-demand AI contradiction check.
 - **Ask** chat with Claude about your library (notes and highlights included as context).
 - **Review** generate a literature-review paragraph or a structured synthesis (agreements / contradictions / gaps / future directions / per-paper contributions).
-- **Add** drop a PDF, AI extracts title, authors, journal, year, DOI, tags, abstract, and key findings.
+- **Add** drop a PDF, AI extracts title, authors, journal, year, DOI, tags, abstract, key findings, plus methods, results, and discussion summaries (collapsed by default in the paper view).
 - **Persistent local storage** papers, notes, highlights, and theme preferences are saved to IndexedDB and survive refreshes.
 - **Desktop app** runs as a packaged Windows `.exe` via Electron, fully local - no browser required.
 - **Themes** Midnight, Parchment, Ocean, Forest. Custom accent colour.
@@ -130,3 +130,6 @@ Papers, notes, highlights, theme, and accent live in IndexedDB under the databas
 ## License
 
 See [LICENSE](LICENSE).
+
+
+### To add in 

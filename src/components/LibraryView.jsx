@@ -14,9 +14,25 @@ export default function LibraryView({
   allTags, statusColors, onSelectPaper,
   projects = [], activeProjectId = null, setActiveProjectId,
   onCreateProject, onRenameProject, onDeleteProject,
+  onAddPaperToProject,
   onExportBibtex, onExportJson, onImportFile, onLoadExamples,
   theme,
 }) {
+  // Track which paper is being dragged so we can suppress the row's onClick
+  // (open paper) once the drag actually moves. Browsers fire click after a
+  // failed drag in some cases.
+  const dragRef = useRef({ paperId: null, didDrag: false });
+  const [openPicker, setOpenPicker] = useState(null); // paper id whose "+" popover is open
+  const pickerWrapRef = useRef(null);
+
+  useEffect(() => {
+    if (!openPicker) return;
+    const handler = (e) => {
+      if (pickerWrapRef.current && !pickerWrapRef.current.contains(e.target)) setOpenPicker(null);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [openPicker]);
   const importRef = useRef(null);
   const exportRef = useRef(null);
   const [ioStatus, setIoStatus] = useState("");
@@ -127,6 +143,7 @@ export default function LibraryView({
               onSelect={() => setActiveProjectId && setActiveProjectId(proj.id)}
               onRename={() => handleRenameProject(proj.id, proj.name)}
               onDelete={() => handleDeleteProject(proj.id, proj.name)}
+              onDropPaper={(paperId) => onAddPaperToProject && onAddPaperToProject(paperId, proj.id)}
             />
           ))
         )}
@@ -216,21 +233,115 @@ export default function LibraryView({
           )}
           {filtered.map((p) => {
             const sc = statusColors[p.status];
+            const inProjects = new Set(p.projects || []);
+            const availableProjects = projects.filter((proj) => !inProjects.has(proj.id));
+            const pickerOpen = openPicker === p.id;
             return (
               <div
                 key={p.id}
                 className="fade-in"
-                onClick={() => onSelectPaper(p)}
+                draggable={Boolean(onAddPaperToProject && projects.length > 0)}
+                onDragStart={(e) => {
+                  dragRef.current = { paperId: p.id, didDrag: true };
+                  e.dataTransfer.effectAllowed = "copy";
+                  // Some browsers require any payload to start the drag.
+                  e.dataTransfer.setData("text/plain", p.id);
+                }}
+                onDragEnd={() => {
+                  // Reset the next click cycle so the row click still works.
+                  setTimeout(() => { dragRef.current = { paperId: null, didDrag: false }; }, 0);
+                }}
+                onClick={() => {
+                  // Suppress the click-after-drag on browsers that fire one.
+                  if (dragRef.current.didDrag && dragRef.current.paperId === p.id) return;
+                  onSelectPaper(p);
+                }}
                 onMouseEnter={(e) => { e.currentTarget.style.background = theme.panelHover; e.currentTarget.style.borderColor = theme.accent + "55"; }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = theme.panel; e.currentTarget.style.borderColor = theme.panelBorder; }}
-                style={{ background: theme.panel, border: "1px solid " + theme.panelBorder, borderRadius: 10, padding: "0.9rem 1rem", cursor: "pointer", transition: "all .2s" }}
+                style={{ background: theme.panel, border: "1px solid " + theme.panelBorder, borderRadius: 10, padding: "0.9rem 1rem", cursor: "pointer", transition: "all .2s", position: "relative" }}
               >
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "0.75rem" }}>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontFamily: "'Instrument Serif', serif", fontSize: "0.95rem", color: theme.textBright, lineHeight: 1.4, marginBottom: "0.3rem" }}>{p.title}</div>
                     <div style={{ fontSize: "0.72rem", color: theme.textMuted, marginBottom: "0.5rem" }}>{p.authors} · {p.journal} · {p.year}</div>
                   </div>
-                  <span style={{ background: sc.bg, color: sc.color, fontSize: "0.62rem", padding: "0.15rem 0.5rem", borderRadius: 4, flexShrink: 0, textTransform: "uppercase", letterSpacing: "0.05em" }}>{sc.label}</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", flexShrink: 0 }}>
+                    {onAddPaperToProject && projects.length > 0 && (
+                      <div ref={pickerOpen ? pickerWrapRef : null} style={{ position: "relative" }}>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenPicker(pickerOpen ? null : p.id);
+                          }}
+                          title="Add to project"
+                          style={{
+                            background: pickerOpen ? theme.accent + "22" : "transparent",
+                            border: "1px solid " + (pickerOpen ? theme.accent : theme.panelBorder),
+                            color: pickerOpen ? theme.accent : theme.textMuted,
+                            borderRadius: 6,
+                            padding: "0.15rem 0.5rem",
+                            fontSize: "0.7rem",
+                            cursor: "pointer",
+                            lineHeight: 1.4,
+                          }}
+                        >
+                          + Project
+                        </button>
+                        {pickerOpen && (
+                          <div
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                              position: "absolute",
+                              right: 0,
+                              top: "calc(100% + 4px)",
+                              background: theme.panel,
+                              border: "1px solid " + theme.panelBorder,
+                              borderRadius: 8,
+                              boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
+                              minWidth: 180,
+                              maxHeight: 220,
+                              overflowY: "auto",
+                              zIndex: 100,
+                              padding: "0.3rem",
+                            }}
+                          >
+                            {availableProjects.length === 0 ? (
+                              <div style={{ padding: "0.4rem 0.55rem", fontSize: "0.7rem", color: theme.textMuted, fontStyle: "italic" }}>
+                                Already in every project.
+                              </div>
+                            ) : (
+                              availableProjects.map((proj) => (
+                                <button
+                                  key={proj.id}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onAddPaperToProject(p.id, proj.id);
+                                    setOpenPicker(null);
+                                  }}
+                                  onMouseEnter={(e) => { e.currentTarget.style.background = theme.panelHover; }}
+                                  onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                                  style={{
+                                    background: "transparent",
+                                    border: "none",
+                                    color: theme.text,
+                                    width: "100%",
+                                    textAlign: "left",
+                                    padding: "0.4rem 0.55rem",
+                                    borderRadius: 6,
+                                    fontSize: "0.74rem",
+                                    cursor: "pointer",
+                                  }}
+                                >
+                                  {proj.name}
+                                </button>
+                              ))
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    <span style={{ background: sc.bg, color: sc.color, fontSize: "0.62rem", padding: "0.15rem 0.5rem", borderRadius: 4, textTransform: "uppercase", letterSpacing: "0.05em" }}>{sc.label}</span>
+                  </div>
                 </div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem", alignItems: "center" }}>
                   {p.tags.map((t) => (
@@ -248,14 +359,39 @@ export default function LibraryView({
   );
 }
 
-// Project sidebar row with hover-revealed rename / delete actions.
-function ProjectRow({ project, count, active, theme, onSelect, onRename, onDelete }) {
+// Project sidebar row with hover-revealed rename / delete actions, and a
+// drop target so the user can drag a paper from the main list onto it.
+function ProjectRow({ project, count, active, theme, onSelect, onRename, onDelete, onDropPaper }) {
   const [hover, setHover] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   return (
     <div
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      style={{ position: "relative", display: "flex", alignItems: "center" }}
+      onDragOver={(e) => {
+        if (!onDropPaper) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+        if (!dragOver) setDragOver(true);
+      }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={(e) => {
+        if (!onDropPaper) return;
+        e.preventDefault();
+        const paperId = e.dataTransfer.getData("text/plain");
+        setDragOver(false);
+        if (paperId) onDropPaper(paperId);
+      }}
+      style={{
+        position: "relative",
+        display: "flex",
+        alignItems: "center",
+        background: dragOver ? theme.accent + "22" : "transparent",
+        outline: dragOver ? "1px dashed " + theme.accent : "none",
+        outlineOffset: -2,
+        borderRadius: 4,
+        transition: "background .12s",
+      }}
     >
       <button
         onClick={onSelect}
@@ -269,11 +405,12 @@ function ProjectRow({ project, count, active, theme, onSelect, onRename, onDelet
           cursor: "pointer",
           paddingRight: hover ? "3rem" : "1rem",
           transition: "padding-right .1s",
+          pointerEvents: dragOver ? "none" : "auto",
         }}
       >
         ▸ {project.name} ({count})
       </button>
-      {hover && (
+      {hover && !dragOver && (
         <div style={{ position: "absolute", right: 6, top: 0, bottom: 0, display: "flex", alignItems: "center", gap: "0.15rem" }}>
           <button
             onClick={onRename}

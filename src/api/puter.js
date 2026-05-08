@@ -12,6 +12,9 @@ import {
   reviewPrompt,
   structuredReviewPrompt,
   tagSuggestionPrompt,
+  contradictionPrompt,
+  enrichFromCitationPrompt,
+  sectionDeepenPrompt,
 } from "../constants/prompts";
 
 export const PUTER_MODELS = [
@@ -87,6 +90,30 @@ export const generateStructuredReview = async (papers, topic) => {
   ensurePuter();
   const res = await window.puter.ai.chat(structuredReviewPrompt(papers, topic), { model });
   return extractJson(extractText(res));
+};
+
+export const compareContradictions = async (papers) => {
+  ensurePuter();
+  const res = await window.puter.ai.chat(contradictionPrompt(papers), { model });
+  return extractJson(extractText(res));
+};
+
+export const deepenSection = async (paper, section) => {
+  ensurePuter();
+  const res = await window.puter.ai.chat(sectionDeepenPrompt(paper, section), { model });
+  return (extractText(res) || "").trim();
+};
+
+export const enrichFromCitation = async (paper) => {
+  ensurePuter();
+  const res = await window.puter.ai.chat(enrichFromCitationPrompt(paper), { model });
+  const j = extractJson(extractText(res));
+  return {
+    keyFindings: Array.isArray(j.keyFindings) ? j.keyFindings.filter((x) => typeof x === "string") : [],
+    methods: typeof j.methods === "string" ? j.methods : "",
+    results: typeof j.results === "string" ? j.results : "",
+    discussion: typeof j.discussion === "string" ? j.discussion : "",
+  };
 };
 
 export const suggestTags = async (paper, existing = []) => {

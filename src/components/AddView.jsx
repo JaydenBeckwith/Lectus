@@ -19,7 +19,9 @@ export default function AddView({ pdfLoading, pdfStatus, onPdfUpload, onDoiLooku
     setDoiLoading(true);
     setDoiStatus("Fetching metadata from CrossRef…");
     try {
-      const result = await onDoiLookup(doi);
+      // Pass a progress callback so the user sees the AI enrichment step
+      // when CrossRef + OpenAlex give us an abstract to work with.
+      const result = await onDoiLookup(doi, (msg) => setDoiStatus(msg));
       setDoiStatus(`✓ Added "${result.title.slice(0, 40)}…"`);
       setDoi("");
     } catch (err) {
@@ -58,7 +60,7 @@ export default function AddView({ pdfLoading, pdfStatus, onPdfUpload, onDoiLooku
         {doiStatus && (
           <div style={{ fontSize: "0.75rem", color: doiStatus.startsWith("✓") ? "#6a9060" : doiStatus.startsWith("Error") ? "#c47a6e" : theme.accent, marginTop: "0.6rem" }}>{doiStatus}</div>
         )}
-        <div style={{ fontSize: "0.68rem", color: theme.textMuted, marginTop: "0.5rem" }}>Free CrossRef lookup — no API key, no PDF required.</div>
+        <div style={{ fontSize: "0.68rem", color: theme.textMuted, marginTop: "0.5rem" }}>Free CrossRef + OpenAlex lookup, then AI fills in key findings, methods, results, and discussion from the abstract.</div>
       </form>
 
       <div onClick={() => !pdfLoading && fileInputRef.current?.click()}
@@ -68,7 +70,7 @@ export default function AddView({ pdfLoading, pdfStatus, onPdfUpload, onDoiLooku
         <input ref={fileInputRef} type="file" accept="application/pdf" onChange={handleChange} style={{ display: "none" }} disabled={pdfLoading} />
         <div style={{ fontSize: "2rem", marginBottom: "0.5rem", opacity: 0.6 }}>📄</div>
         <div style={{ fontFamily: "'Instrument Serif', serif", fontSize: "1.05rem", color: theme.accent, marginBottom: "0.3rem", fontStyle: "italic" }}>{pdfLoading ? pdfStatus : "Drop a PDF or click to upload"}</div>
-        <div style={{ fontSize: "0.72rem", color: theme.textMuted }}>{pdfLoading ? "" : "AI extracts title, authors, abstract, tags, key findings"}</div>
+        <div style={{ fontSize: "0.72rem", color: theme.textMuted }}>{pdfLoading ? "" : "AI extracts title, authors, abstract, tags, key findings, methods, results, discussion"}</div>
         {pdfStatus && !pdfLoading && (
           <div style={{ fontSize: "0.78rem", color: pdfStatus.startsWith("✓") ? "#6a9060" : theme.accent, marginTop: "0.75rem" }}>{pdfStatus}</div>
         )}

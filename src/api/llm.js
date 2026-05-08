@@ -19,6 +19,9 @@ export const askLibrary = (...a) => choose().askLibrary(...a);
 export const askLibraryStream = (...a) => choose().askLibraryStream(...a);
 export const generateReviewParagraph = (...a) => choose().generateReviewParagraph(...a);
 export const generateStructuredReview = (...a) => choose().generateStructuredReview(...a);
+export const compareContradictions = (...a) => choose().compareContradictions(...a);
+export const enrichFromCitation = (...a) => choose().enrichFromCitation(...a);
+export const deepenSection = (...a) => choose().deepenSection(...a);
 export const suggestTags = (...a) => choose().suggestTags(...a);
 
 // PDF: always Anthropic (Puter doesn't accept raw PDFs via chat).
