@@ -11,6 +11,7 @@ export default function PaperDetail({
   onBack,
   onAskAI,
   onSuggestTags,
+  onDeepenSection,
   hasKey,
   projects = [],
   onToggleProject,
@@ -171,6 +172,31 @@ export default function PaperDetail({
       <Section title="Abstract" theme={theme}>
         <div style={{ fontSize: "0.83rem", lineHeight: 1.7, color: theme.text }}>{paper.abstract}</div>
       </Section>
+
+      <CollapsibleSection
+        title="Methods"
+        sectionKey="methods"
+        body={paper.methods}
+        onDeepen={onDeepenSection}
+        canDeepen={Boolean(hasKey)}
+        theme={theme}
+      />
+      <CollapsibleSection
+        title="Results"
+        sectionKey="results"
+        body={paper.results}
+        onDeepen={onDeepenSection}
+        canDeepen={Boolean(hasKey)}
+        theme={theme}
+      />
+      <CollapsibleSection
+        title="Discussion"
+        sectionKey="discussion"
+        body={paper.discussion}
+        onDeepen={onDeepenSection}
+        canDeepen={Boolean(hasKey)}
+        theme={theme}
+      />
 
       <Section title="Key Findings" theme={theme}>
         {paper.keyFindings.map((f, i) => (
@@ -404,6 +430,141 @@ export default function PaperDetail({
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+// Collapsible block for a longer prose section (Methods / Results /
+// Discussion). Always renders so the user can request an AI-deepened
+// summary even when DOI-add only gave us the abstract.
+function CollapsibleSection({ title, sectionKey, body, onDeepen, canDeepen, theme }) {
+  const hasBody = Boolean(body && body.trim());
+  const [open, setOpen] = useState(hasBody ? false : true);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleDeepen = async (e) => {
+    e?.stopPropagation();
+    if (!onDeepen || loading) return;
+    setLoading(true);
+    setError("");
+    try {
+      await onDeepen(sectionKey);
+      setOpen(true);
+    } catch (err) {
+      setError(err?.message || "Could not generate summary");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div
+      style={{
+        background: theme.panel,
+        border: `1px solid ${theme.panelBorder}`,
+        borderRadius: 10,
+        padding: "0.85rem 1.1rem",
+        marginBottom: "1rem",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "0.6rem",
+        }}
+      >
+        <button
+          onClick={() => hasBody && setOpen((o) => !o)}
+          style={{
+            background: "none",
+            border: "none",
+            padding: 0,
+            display: "flex",
+            alignItems: "center",
+            gap: "0.5rem",
+            cursor: hasBody ? "pointer" : "default",
+            color: "inherit",
+            flex: 1,
+            textAlign: "left",
+          }}
+        >
+          <span
+            style={{
+              fontSize: "0.65rem",
+              color: theme.textMuted,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+            }}
+          >
+            {title}
+          </span>
+          {hasBody && (
+            <span style={{ fontSize: "0.7rem", color: theme.accent }}>
+              {open ? "Hide ▴" : "Show ▾"}
+            </span>
+          )}
+          {!hasBody && (
+            <span style={{ fontSize: "0.68rem", color: theme.textMuted, fontStyle: "italic" }}>
+              not extracted
+            </span>
+          )}
+        </button>
+
+        {onDeepen && (
+          <button
+            onClick={handleDeepen}
+            disabled={loading || !canDeepen}
+            title={canDeepen ? "Use AI to write a longer summary of this section" : "Connect an AI provider in Settings"}
+            style={{
+              background: canDeepen ? theme.chip : "transparent",
+              border: `1px solid ${canDeepen ? theme.chipBorder : theme.panelBorder}`,
+              color: canDeepen ? theme.accent : theme.textMuted,
+              borderRadius: 6,
+              padding: "0.25rem 0.6rem",
+              fontSize: "0.65rem",
+              cursor: canDeepen && !loading ? "pointer" : "not-allowed",
+              whiteSpace: "nowrap",
+              opacity: loading ? 0.7 : 1,
+            }}
+          >
+            {loading ? "Thinking…" : hasBody ? "Expand with AI ✦" : "Generate with AI ✦"}
+          </button>
+        )}
+      </div>
+
+      {error && (
+        <div
+          style={{
+            background: "#7c4a4a22",
+            border: "1px solid #7c4a4a55",
+            color: "#c47a6e",
+            borderRadius: 6,
+            padding: "0.4rem 0.6rem",
+            marginTop: "0.55rem",
+            fontSize: "0.74rem",
+          }}
+        >
+          {error}
+        </div>
+      )}
+
+      {open && hasBody && (
+        <div
+          className="fade-in"
+          style={{
+            fontSize: "0.83rem",
+            lineHeight: 1.7,
+            color: theme.text,
+            marginTop: "0.7rem",
+            whiteSpace: "pre-wrap",
+          }}
+        >
+          {body}
+        </div>
+      )}
     </div>
   );
 }

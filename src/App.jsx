@@ -7,6 +7,8 @@ import {
   extractPaperFromPdf,
   generateReviewParagraph,
   generateStructuredReview,
+  enrichFromCitation,
+  deepenSection,
   setRuntimeApiKey,
   setProvider,
   setPuterModel,
@@ -277,6 +279,19 @@ export default function App() {
     }
   };
 
+  // Idempotent add. Used by the library drag-drop and the per-row picker —
+  // never removes membership, so you can drag a paper onto the same project
+  // twice without surprise.
+  const addPaperToProject = (paperId, projectId) => {
+    setPapers((prev) => prev.map((p) => {
+      if (p.id !== paperId) return p;
+      const ids = new Set(p.projects || []);
+      if (ids.has(projectId)) return p;
+      ids.add(projectId);
+      return { ...p, projects: Array.from(ids) };
+    }));
+  };
+
   // Remove a paper from the library. PaperDetail confirms before calling
   // this, so we just do the work and bounce back to the library list.
   const deletePaper = (id) => {
@@ -313,13 +328,22 @@ export default function App() {
   };
   const askAIAboutPaper = (prompt) => { setView("chat"); sendChat(prompt); };
 
+  // Per-section AI deepen for an existing paper. The CollapsibleSection in
+  // PaperDetail calls this with section ∈ {"methods","results","discussion"}.
+  const deepenPaperSection = async (paperId, section) => {
+    const target = papers.find((p) => p.id === paperId);
+    if (!target) return;
+    const text = await deepenSection(target, section);
+    if (text) updatePaper(paperId, { [section]: text });
+  };
+
   const handlePdfUpload = async (file) => {
     if (!file) return;
     if (file.type !== "application/pdf") { setPdfStatus("Please upload a PDF file"); return; }
     setPdfLoading(true); setPdfStatus("Reading PDF...");
     try {
       const base64 = await readAsBase64(file);
-      setPdfStatus("AI extracting metadata...");
+      setPdfStatus("AI extracting metadata, methods, results, discussion...");
       const parsed = await extractPaperFromPdf(base64);
       const newPaper = { id: `p${Date.now()}`, ...parsed, notes: "", highlights: [], status: "to-read", projects: projectStamp() };
       setPapers((prev) => [newPaper, ...prev]);
@@ -332,12 +356,40 @@ export default function App() {
     }
   };
 
-  const handleDoiLookup = async (doi) => {
+  // DOI flow: CrossRef (citation) → OpenAlex fallback (abstract) → AI enrich
+  // (keyFindings + methods + results + discussion). The AI step is best-effort
+  // — if there's no abstract or no AI access, we save the citation as-is.
+  // `onProgress` is optional; AddView wires it up so the user sees each step.
+  const handleDoiLookup = async (doi, onProgress) => {
+    onProgress?.("Fetching citation from CrossRef…");
     const meta = await lookupDoi(doi);
     if (papers.some((p) => p.doi && p.doi.toLowerCase() === meta.doi.toLowerCase())) {
       throw new Error("DOI already in your library");
     }
-    const newPaper = { id: `p${Date.now()}`, ...meta, notes: "", highlights: [], status: "to-read", projects: projectStamp() };
+
+    const aiAvailable = providerState === "puter" || Boolean(apiKey);
+    let enriched = {};
+    if (aiAvailable && meta.abstract && meta.abstract.length > 50) {
+      try {
+        onProgress?.("AI generating key findings, methods, results, discussion…");
+        enriched = await enrichFromCitation(meta);
+      } catch {
+        // Enrichment is best-effort; ignore failures and keep the citation.
+      }
+    }
+
+    const newPaper = {
+      id: `p${Date.now()}`,
+      ...meta,
+      keyFindings: enriched.keyFindings?.length ? enriched.keyFindings : meta.keyFindings,
+      methods: enriched.methods || meta.methods || "",
+      results: enriched.results || meta.results || "",
+      discussion: enriched.discussion || meta.discussion || "",
+      notes: "",
+      highlights: [],
+      status: "to-read",
+      projects: projectStamp(),
+    };
     setPapers((prev) => [newPaper, ...prev]);
     return newPaper;
   };
@@ -422,11 +474,11 @@ export default function App() {
 
       <TopBar view={view} onChangeView={setView} saveState={saveState} theme={theme} />
 
-      {view === "library" && <LibraryView papers={papers} filtered={filtered} search={search} setSearch={setSearch} activeTag={activeTag} setActiveTag={setActiveTag} statusFilter={statusFilter} setStatusFilter={setStatusFilter} allTags={allTags} statusColors={statusColors} onSelectPaper={openPaper} projects={projects} activeProjectId={activeProjectId} setActiveProjectId={setActiveProjectId} onCreateProject={createProject} onRenameProject={renameProject} onDeleteProject={deleteProject} onExportBibtex={exportBibtex} onExportJson={exportJson} onImportFile={handleImportFile} onLoadExamples={loadExamples} theme={theme} />}
+      {view === "library" && <LibraryView papers={papers} filtered={filtered} search={search} setSearch={setSearch} activeTag={activeTag} setActiveTag={setActiveTag} statusFilter={statusFilter} setStatusFilter={setStatusFilter} allTags={allTags} statusColors={statusColors} onSelectPaper={openPaper} projects={projects} activeProjectId={activeProjectId} setActiveProjectId={setActiveProjectId} onCreateProject={createProject} onRenameProject={renameProject} onDeleteProject={deleteProject} onAddPaperToProject={addPaperToProject} onExportBibtex={exportBibtex} onExportJson={exportJson} onImportFile={handleImportFile} onLoadExamples={loadExamples} theme={theme} />}
       {view === "graph" && <GraphView papers={papers} onSelectPaper={openPaper} theme={theme} />}
       {view === "timeline" && <TimelineView papers={papers} onSelectPaper={openPaper} theme={theme} />}
-      {view === "compare" && <CompareView papers={papers} onSelectPaper={openPaper} theme={theme} />}
-      {view === "paper" && selected && <PaperDetail paper={selected} statusColors={statusColors} onUpdate={updatePaper} onDelete={deletePaper} onBack={() => setView("library")} onAskAI={askAIAboutPaper} onSuggestTags={(p) => suggestTags(p, p.tags)} hasKey={providerState === "puter" || Boolean(apiKey)} projects={projects} onToggleProject={togglePaperInProject} theme={theme} />}
+      {view === "compare" && <CompareView papers={papers} onSelectPaper={openPaper} hasKey={providerState === "puter" || Boolean(apiKey)} onConnect={openOnboarding} theme={theme} />}
+      {view === "paper" && selected && <PaperDetail paper={selected} statusColors={statusColors} onUpdate={updatePaper} onDelete={deletePaper} onBack={() => setView("library")} onAskAI={askAIAboutPaper} onSuggestTags={(p) => suggestTags(p, p.tags)} onDeepenSection={(section) => deepenPaperSection(selected.id, section)} hasKey={providerState === "puter" || Boolean(apiKey)} projects={projects} onToggleProject={togglePaperInProject} theme={theme} />}
       {view === "chat" && <ChatView papers={papers} messages={messages} loading={loading} chatInput={chatInput} setChatInput={setChatInput} onSend={sendChat} hasKey={providerState === "puter" || Boolean(apiKey)} onConnect={openOnboarding} theme={theme} />}
       {view === "review" && <ReviewView papers={papers} reviewSelection={reviewSelection} setReviewSelection={setReviewSelection} reviewTopic={reviewTopic} setReviewTopic={setReviewTopic} reviewMode={reviewMode} setReviewMode={setReviewMode} reviewOutput={reviewOutput} reviewStructured={reviewStructured} reviewLoading={reviewLoading} reviewError={reviewError} onGenerate={generateReview} hasKey={providerState === "puter" || Boolean(apiKey)} onConnect={openOnboarding} theme={theme} />}
       {view === "add" && <AddView pdfLoading={pdfLoading} pdfStatus={pdfStatus} onPdfUpload={handlePdfUpload} onDoiLookup={handleDoiLookup} hasKey={providerState === "puter" || Boolean(apiKey)} onConnect={openOnboarding} theme={theme} />}

@@ -4,6 +4,11 @@
 // pass a mailto via the User-Agent string. Because the browser ignores the
 // User-Agent header, we use the `mailto` query param instead, which is
 // equally honoured by CrossRef.
+//
+// CrossRef sometimes returns an empty abstract; we fall back to OpenAlex
+// (which stores abstracts as an inverted index) inside `lookupDoi`.
+
+import { lookupOpenAlex } from "./openalex";
 
 const CROSSREF_BASE = "https://api.crossref.org/works/";
 const POLITE_MAILTO = "lectus@example.local"; // override by editing locally
@@ -50,6 +55,24 @@ export const lookupDoi = async (rawDoi) => {
   }
   const data = await res.json();
   const m = data.message || {};
+
+  let abstract = stripJatsTags(m.abstract || "");
+  let tags = Array.isArray(m.subject) ? m.subject.slice(0, 6) : [];
+
+  // CrossRef abstracts are sparsely populated. If empty, try OpenAlex —
+  // they store an inverted index even when the publisher hasn't deposited
+  // a clean abstract field.
+  if (!abstract || tags.length === 0) {
+    try {
+      const oa = await lookupOpenAlex(doi);
+      if (!abstract && oa.abstract) abstract = oa.abstract;
+      if (tags.length === 0 && oa.concepts.length) tags = oa.concepts;
+    } catch {
+      // OpenAlex is best-effort. If it fails, we still return CrossRef's
+      // metadata with whatever we already have.
+    }
+  }
+
   return {
     title: Array.isArray(m.title) ? m.title[0] : m.title || "(untitled)",
     authors: formatAuthors(m.author),
@@ -57,8 +80,11 @@ export const lookupDoi = async (rawDoi) => {
       (Array.isArray(m["container-title"]) ? m["container-title"][0] : m["container-title"]) || "",
     year: yearFromIssued(m),
     doi: m.DOI || doi,
-    tags: Array.isArray(m.subject) ? m.subject.slice(0, 6) : [],
-    abstract: stripJatsTags(m.abstract || ""),
+    tags,
+    abstract,
     keyFindings: [],
+    methods: "",
+    results: "",
+    discussion: "",
   };
 };

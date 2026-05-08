@@ -4,6 +4,9 @@ import {
   reviewPrompt,
   structuredReviewPrompt,
   tagSuggestionPrompt,
+  contradictionPrompt,
+  enrichFromCitationPrompt,
+  sectionDeepenPrompt,
 } from "../constants/prompts";
 
 const ENDPOINT = "https://api.anthropic.com/v1/messages";
@@ -111,10 +114,36 @@ export const askLibraryStream = async (papers, messages, onDelta, signal) => {
   return full;
 };
 
+const extractJson = (raw) => {
+  const cleaned = raw.replace(/```json|```/g, "").trim();
+  const start = cleaned.indexOf("{");
+  const end = cleaned.lastIndexOf("}");
+  if (start === -1 || end === -1) throw new Error("No JSON object in response");
+  return JSON.parse(cleaned.slice(start, end + 1));
+};
+
+// Make sure every field downstream code expects is present, even if the model
+// skips one. Empty strings/arrays render harmlessly in the UI.
+const normalisePaper = (p) => ({
+  title: p.title || "(untitled)",
+  authors: p.authors || "Unknown",
+  journal: p.journal || "",
+  year: p.year || null,
+  doi: p.doi || "",
+  tags: Array.isArray(p.tags) ? p.tags : [],
+  abstract: p.abstract || "",
+  keyFindings: Array.isArray(p.keyFindings) ? p.keyFindings : [],
+  methods: typeof p.methods === "string" ? p.methods : "",
+  results: typeof p.results === "string" ? p.results : "",
+  discussion: typeof p.discussion === "string" ? p.discussion : "",
+});
+
 export const extractPaperFromPdf = async (base64Pdf) => {
+  // 4500 tokens leaves enough headroom for abstract + methods + results +
+  // discussion (each ~150-400 words) plus the metadata block.
   const data = await post({
     model: MODEL,
-    max_tokens: 1500,
+    max_tokens: 4500,
     messages: [
       {
         role: "user",
@@ -125,8 +154,8 @@ export const extractPaperFromPdf = async (base64Pdf) => {
       },
     ],
   });
-  const txt = data.content?.[0]?.text?.trim() || "";
-  return JSON.parse(txt.replace(/```json|```/g, "").trim());
+  const raw = data.content?.[0]?.text || "";
+  return normalisePaper(extractJson(raw));
 };
 
 export const generateReviewParagraph = async (papers, topic) => {
@@ -138,14 +167,6 @@ export const generateReviewParagraph = async (papers, topic) => {
   return data.content?.[0]?.text || "Error.";
 };
 
-const extractJson = (raw) => {
-  const cleaned = raw.replace(/```json|```/g, "").trim();
-  const start = cleaned.indexOf("{");
-  const end = cleaned.lastIndexOf("}");
-  if (start === -1 || end === -1) throw new Error("No JSON object in response");
-  return JSON.parse(cleaned.slice(start, end + 1));
-};
-
 export const generateStructuredReview = async (papers, topic) => {
   const data = await post({
     model: MODEL,
@@ -154,6 +175,47 @@ export const generateStructuredReview = async (papers, topic) => {
   });
   const raw = data.content?.[0]?.text || "";
   return extractJson(raw);
+};
+
+export const compareContradictions = async (papers) => {
+  const data = await post({
+    model: MODEL,
+    max_tokens: 2000,
+    messages: [{ role: "user", content: contradictionPrompt(papers) }],
+  });
+  const raw = data.content?.[0]?.text || "";
+  return extractJson(raw);
+};
+
+// Per-section deepen. Returns a longer, focused summary of a single
+// section (methods | results | discussion) for an existing paper. Plain
+// text; the caller writes it back onto paper[section].
+export const deepenSection = async (paper, section) => {
+  const data = await post({
+    model: MODEL,
+    max_tokens: 1500,
+    messages: [{ role: "user", content: sectionDeepenPrompt(paper, section) }],
+  });
+  return (data.content?.[0]?.text || "").trim();
+};
+
+// Fill in keyFindings + methods + results + discussion for a citation we
+// just looked up via DOI (where we don't have a PDF). Returns the four
+// fields normalised; empty values where the LLM didn't have enough to go on.
+export const enrichFromCitation = async (paper) => {
+  const data = await post({
+    model: MODEL,
+    max_tokens: 1800,
+    messages: [{ role: "user", content: enrichFromCitationPrompt(paper) }],
+  });
+  const raw = data.content?.[0]?.text || "";
+  const j = extractJson(raw);
+  return {
+    keyFindings: Array.isArray(j.keyFindings) ? j.keyFindings.filter((x) => typeof x === "string") : [],
+    methods: typeof j.methods === "string" ? j.methods : "",
+    results: typeof j.results === "string" ? j.results : "",
+    discussion: typeof j.discussion === "string" ? j.discussion : "",
+  };
 };
 
 // Ask Claude for 4-6 tag suggestions for a paper. Returns a string array;
