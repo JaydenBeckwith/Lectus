@@ -110,12 +110,33 @@ src/
 | `npm run dev`            | Start the Vite dev server on port 5173.                        |
 | `npm run build`          | Produce a production build in `dist/`.                         |
 | `npm run preview`        | Preview the production build locally.                          |
+| `npm test`               | Run the Vitest unit-test suite once (used by CI).              |
+| `npm run test:watch`     | Run Vitest in watch mode for local development.                |
 | `npm run electron:dev`   | Launch Vite + Electron together (auto-reload, devtools open).  |
 | `npm run electron:build` | Build the Vite bundle, then package a Windows `.exe` installer. |
 
 ## Desktop build
 
 `npm run electron:build` outputs a Windows installer to `release/`. The default target is NSIS x64; tweak `build.win.target` in `package.json` to add `portable`, `msi`, or other architectures. Building Windows installers requires running on Windows (or wine).
+
+## Testing & CI
+
+Unit tests live next to the source they cover (`*.test.js`) and run on
+[Vitest](https://vitest.dev) with a jsdom environment. They focus on the
+pure modules where regressions are cheapest to catch:
+
+- `src/constants/tagColors.test.js` — deterministic hash-to-hex tag colours.
+- `src/constants/prompts.test.js` — prompt builders include the right fields.
+- `src/utils/bibtex.test.js` — BibTeX serialise + parse round-trip.
+- `src/utils/graph.test.js` — shared-tag edge construction and layout bounds.
+- `src/utils/format.test.js` — chat markdown helper.
+- `src/api/openalex.test.js` — abstract reconstruction from the inverted index.
+- `src/api/crossref.test.js` — DOI cleaning, author formatting, OpenAlex fallback.
+
+Run locally with `npm test` (one shot) or `npm run test:watch` (re-run on
+save). CI (`.github/workflows/ci.yml`) installs dependencies with `npm ci`,
+runs the test suite, and produces a production build on every push and pull
+request to `main` / `master`.
 
 ## Persistence
 
@@ -129,6 +150,3 @@ Papers, notes, highlights, theme, and accent live in IndexedDB under the databas
 ## License
 
 See [LICENSE](LICENSE).
-
-
-### To add in 
