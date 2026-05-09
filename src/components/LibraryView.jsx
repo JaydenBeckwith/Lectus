@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { tagColor } from "../constants/tagColors";
+import { PromptModal, ConfirmModal } from "./Modal";
 
 const STATUS_OPTIONS = [
   ["all", "All"],
@@ -51,12 +52,18 @@ export default function LibraryView({
     const file = e.target.files?.[0];
     if (!file || !onImportFile) return;
     setIoStatus("Reading file…");
+    let isError = false;
     try {
       const result = await onImportFile(file);
       setIoStatus("✓ Imported " + result.added + " paper" + (result.added === 1 ? "" : "s") + " (" + result.skipped + " duplicates skipped)");
-    } catch (err) { setIoStatus("Error: " + err.message); }
+    } catch (err) {
+      isError = true;
+      setIoStatus("Error: " + err.message);
+    }
     if (importRef.current) importRef.current.value = "";
-    setTimeout(() => setIoStatus(""), 4000);
+    // Errors get a longer dwell so the user can read multi-sentence
+    // guidance (e.g. the .enl export instructions).
+    setTimeout(() => setIoStatus(""), isError ? 14000 : 4000);
   };
   const handleLoadExamples = () => {
     if (!onLoadExamples) return;
@@ -65,21 +72,23 @@ export default function LibraryView({
     setTimeout(() => setIoStatus(""), 3000);
   };
 
+  // Modal state. We keep one piece of state per intent (new / rename /
+  // delete) so opening one closes the others.
+  const [newProjOpen, setNewProjOpen] = useState(false);
+  const [renaming, setRenaming] = useState(null); // { id, name } | null
+  const [deleting, setDeleting] = useState(null); // { id, name } | null
+
   const handleNewProject = () => {
     if (!onCreateProject) return;
-    const name = window.prompt("New project name:");
-    if (name && name.trim()) onCreateProject(name.trim());
+    setNewProjOpen(true);
   };
   const handleDeleteProject = (id, name) => {
     if (!onDeleteProject) return;
-    if (window.confirm("Delete project \"" + name + "\"?\n\nThe project is removed and all papers stay in your library — they're just unlinked from this project.")) {
-      onDeleteProject(id);
-    }
+    setDeleting({ id, name });
   };
   const handleRenameProject = (id, currentName) => {
     if (!onRenameProject) return;
-    const next = window.prompt("Rename project:", currentName);
-    if (next && next.trim() && next.trim() !== currentName) onRenameProject(id, next.trim());
+    setRenaming({ id, name: currentName });
   };
 
   const ioTone = ioStatus.startsWith("✓") ? "#6a9060" : ioStatus.startsWith("Error") ? "#c47a6e" : theme.accent;
@@ -164,6 +173,61 @@ export default function LibraryView({
             {t} ({papers.filter((p) => p.tags.includes(t)).length})
           </button>
         ))}
+
+        {/* ── Library file ───────────────────────────────────────────
+            Quick load / save of the JSON backup so users can carry
+            their notes, tags, projects across machines and reinstalls
+            without digging into Settings. */}
+        {(onImportFile || onExportJson) && (
+          <>
+            <div style={{ ...sectionLabel, marginTop: "1.1rem" }}><span>Library file</span></div>
+            <div style={{ padding: "0 1rem", display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+              {onImportFile && (
+                <button
+                  onClick={() => importRef.current?.click()}
+                  title="Load a Lectus JSON backup, BibTeX, EndNote (.enw) or RIS (.ris) — your notes, tags, highlights and projects come along."
+                  style={{
+                    background: "transparent",
+                    border: "1px solid " + theme.panelBorder,
+                    color: theme.textSubtle,
+                    borderRadius: 8,
+                    padding: "0.4rem 0.6rem",
+                    fontSize: "0.72rem",
+                    cursor: "pointer",
+                    textAlign: "left",
+                  }}
+                >
+                  ⇣ Load library…
+                </button>
+              )}
+              {onExportJson && (
+                <button
+                  onClick={() => onExportJson()}
+                  disabled={!papers.length}
+                  title={papers.length ? "Save a JSON backup of your library — papers, notes, tags, highlights, projects." : "Add papers first"}
+                  style={{
+                    background: "transparent",
+                    border: "1px solid " + theme.panelBorder,
+                    color: papers.length ? theme.textSubtle : theme.textMuted,
+                    borderRadius: 8,
+                    padding: "0.4rem 0.6rem",
+                    fontSize: "0.72rem",
+                    cursor: papers.length ? "pointer" : "not-allowed",
+                    textAlign: "left",
+                    opacity: papers.length ? 1 : 0.55,
+                  }}
+                >
+                  ⇡ Save backup
+                </button>
+              )}
+              {ioStatus && (
+                <div style={{ fontSize: "0.66rem", color: ioTone, lineHeight: 1.5, paddingTop: "0.2rem" }}>
+                  {ioStatus}
+                </div>
+              )}
+            </div>
+          </>
+        )}
       </div>
 
       {/* Main panel */}
@@ -203,8 +267,8 @@ export default function LibraryView({
                 )}
                 {onImportFile && (
                   <>
-                    <button onClick={() => importRef.current?.click()} title="Import a .bib or .json file" style={ioBtnGhost}>Import</button>
-                    <input ref={importRef} type="file" accept=".bib,.json,application/json,text/plain" onChange={handleImportClick} style={{ display: "none" }} />
+                    <button onClick={() => importRef.current?.click()} title="Import a BibTeX, EndNote (.enw / .ris), .enl library (export needed), or JSON backup" style={ioBtnGhost}>Import</button>
+                    <input ref={importRef} type="file" accept=".bib,.bibtex,.enw,.ris,.enl,.json,.txt,application/json,text/plain" onChange={handleImportClick} style={{ display: "none" }} />
                   </>
                 )}
                 {onLoadExamples && papers.length === 0 && (
@@ -213,7 +277,19 @@ export default function LibraryView({
               </div>
             )}
           </div>
-          {ioStatus && <div style={{ fontSize: "0.72rem", color: ioTone }}>{ioStatus}</div>}
+          {ioStatus && (
+            <div
+              style={{
+                fontSize: "0.72rem",
+                color: ioTone,
+                lineHeight: 1.55,
+                maxWidth: 760,
+                whiteSpace: "pre-wrap",
+              }}
+            >
+              {ioStatus}
+            </div>
+          )}
         </div>
 
         <div style={{ flex: 1, overflowY: "auto", padding: "0.75rem 1.25rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
@@ -344,6 +420,39 @@ export default function LibraryView({
                   </div>
                 </div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem", alignItems: "center" }}>
+                  {/* Project membership — clicking a project chip activates
+                      that project as the sidebar filter. Distinct shape +
+                      accent palette so it doesn't get confused with tags. */}
+                  {(p.projects || []).map((projId) => {
+                    const proj = projects.find((x) => x.id === projId);
+                    if (!proj) return null;
+                    return (
+                      <button
+                        key={projId}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (setActiveProjectId) setActiveProjectId(projId);
+                        }}
+                        title={`Project: ${proj.name} — click to filter library`}
+                        style={{
+                          background: theme.accent + "1a",
+                          color: theme.accent,
+                          border: `1px solid ${theme.accent}55`,
+                          borderRadius: 4,
+                          padding: "0.15rem 0.5rem",
+                          fontSize: "0.65rem",
+                          cursor: "pointer",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "0.3rem",
+                          fontWeight: 500,
+                        }}
+                      >
+                        <span style={{ opacity: 0.85 }}>▣</span>
+                        {proj.name}
+                      </button>
+                    );
+                  })}
                   {p.tags.map((t) => (
                     <span key={t} style={{ background: tagColor(t) + "33", color: tagColor(t) + "ee", border: "1px solid " + tagColor(t) + "44", borderRadius: 12, padding: "0.15rem 0.55rem", fontSize: "0.65rem" }}>{t}</span>
                   ))}
@@ -355,6 +464,45 @@ export default function LibraryView({
           })}
         </div>
       </div>
+
+      <PromptModal
+        open={newProjOpen}
+        title="New project"
+        message="Group papers together by theme, project, or course. A paper can belong to multiple projects."
+        placeholder="e.g. CTLA4 isoforms"
+        confirmLabel="Create"
+        onSubmit={(name) => {
+          onCreateProject?.(name);
+          setNewProjOpen(false);
+        }}
+        onCancel={() => setNewProjOpen(false)}
+        theme={theme}
+      />
+      <PromptModal
+        open={!!renaming}
+        title="Rename project"
+        defaultValue={renaming?.name || ""}
+        confirmLabel="Rename"
+        onSubmit={(name) => {
+          if (renaming && name !== renaming.name) onRenameProject?.(renaming.id, name);
+          setRenaming(null);
+        }}
+        onCancel={() => setRenaming(null)}
+        theme={theme}
+      />
+      <ConfirmModal
+        open={!!deleting}
+        title={`Delete "${deleting?.name || ""}"?`}
+        message={"The project is removed and all papers stay in your library — they're just unlinked from this project."}
+        confirmLabel="Delete project"
+        danger
+        onConfirm={() => {
+          if (deleting) onDeleteProject?.(deleting.id);
+          setDeleting(null);
+        }}
+        onCancel={() => setDeleting(null)}
+        theme={theme}
+      />
     </div>
   );
 }

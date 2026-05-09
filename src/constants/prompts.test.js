@@ -51,6 +51,17 @@ describe("PDF_EXTRACT_PROMPT", () => {
   });
 });
 
+describe("pdfTextExtractPrompt", () => {
+  it("inlines the supplied paper text", async () => {
+    const { pdfTextExtractPrompt } = await import("./prompts");
+    const out = pdfTextExtractPrompt("HELLO PAPER TEXT");
+    expect(out).toContain("HELLO PAPER TEXT");
+    expect(out).toMatch(/"methods":/);
+    expect(out).toMatch(/"discussion":/);
+    expect(out).toMatch(/figure captions, page numbers/i);
+  });
+});
+
 describe("reviewPrompt", () => {
   it("threads the topic through and includes the paper count", () => {
     const out = reviewPrompt([paper(), paper({ id: "p2" })], "splicing");
@@ -107,6 +118,12 @@ describe("sectionDeepenPrompt", () => {
   it("includes the existing section text so the model can improve on it", () => {
     const out = sectionDeepenPrompt(paper({ methods: "Old methods." }), "methods");
     expect(out).toContain("Old methods.");
+  });
+
+  it("flags the no-full-text limitation and offers the attach-PDF workaround", () => {
+    const out = sectionDeepenPrompt(paper(), "discussion");
+    expect(out).toMatch(/do NOT have access to the full text/i);
+    expect(out).toMatch(/attach the full PDF/i);
   });
 });
 

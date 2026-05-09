@@ -41,7 +41,7 @@ const DEFAULT_VISIBLE = new Set([
 // a sticky-header table where each row labels a facet (abstract, findings,
 // tags, notes, highlights, plus optional methods/results/discussion) and each
 // column is a paper. Includes an on-demand AI contradiction check.
-export default function CompareView({ papers, onSelectPaper, hasKey, onConnect, theme }) {
+export default function CompareView({ papers, onSelectPaper, hasKey, onConnect, projects = [], theme }) {
   const [selection, setSelection] = useState([]);
   const [visible, setVisible] = useState(DEFAULT_VISIBLE);
 
@@ -54,6 +54,7 @@ export default function CompareView({ papers, onSelectPaper, hasKey, onConnect, 
   const [filterAuthor, setFilterAuthor] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterTag, setFilterTag] = useState("all");
+  const [filterProject, setFilterProject] = useState("all");
   const pickerRef = useRef(null);
 
   const [contradictions, setContradictions] = useState(null);
@@ -92,6 +93,7 @@ export default function CompareView({ papers, onSelectPaper, hasKey, onConnect, 
       if (filterAuthor !== "all" && firstAuthorOf(p.authors) !== filterAuthor) return false;
       if (filterStatus !== "all" && (p.status || "to-read") !== filterStatus) return false;
       if (filterTag !== "all" && !(p.tags || []).includes(filterTag)) return false;
+      if (filterProject !== "all" && !(p.projects || []).includes(filterProject)) return false;
       if (!q) return true;
       return (
         p.title.toLowerCase().includes(q) ||
@@ -100,7 +102,7 @@ export default function CompareView({ papers, onSelectPaper, hasKey, onConnect, 
         (p.tags || []).some((t) => t.toLowerCase().includes(q))
       );
     });
-  }, [papers, search, filterYear, filterMonth, filterAuthor, filterStatus, filterTag]);
+  }, [papers, search, filterYear, filterMonth, filterAuthor, filterStatus, filterTag, filterProject]);
 
   const clearFilters = () => {
     setSearch("");
@@ -109,6 +111,7 @@ export default function CompareView({ papers, onSelectPaper, hasKey, onConnect, 
     setFilterAuthor("all");
     setFilterStatus("all");
     setFilterTag("all");
+    setFilterProject("all");
   };
   const filtersActive =
     Boolean(search) ||
@@ -116,7 +119,8 @@ export default function CompareView({ papers, onSelectPaper, hasKey, onConnect, 
     filterMonth !== "all" ||
     filterAuthor !== "all" ||
     filterStatus !== "all" ||
-    filterTag !== "all";
+    filterTag !== "all" ||
+    filterProject !== "all";
 
   const toggle = (id) => {
     setSelection((prev) => {
@@ -274,11 +278,14 @@ export default function CompareView({ papers, onSelectPaper, hasKey, onConnect, 
                 setFilterStatus={setFilterStatus}
                 filterTag={filterTag}
                 setFilterTag={setFilterTag}
+                filterProject={filterProject}
+                setFilterProject={setFilterProject}
                 clearFilters={clearFilters}
                 filtersActive={filtersActive}
                 years={years}
                 authors={authors}
                 tagsList={tags}
+                projectsList={projects}
                 maxReached={selection.length >= MAX_COMPARE}
               />
             )}
@@ -357,7 +364,7 @@ export default function CompareView({ papers, onSelectPaper, hasKey, onConnect, 
             <button
               onClick={runAnalysis}
               disabled={contradictionsLoading || !hasKey}
-              title={!hasKey ? "Connect an AI provider in Settings" : "Find contradictions across selected papers"}
+              title={!hasKey ? "Connect an AI provider in Settings" : "Run an AI comparison across the selected papers — agreements, contradictions, and a summary"}
               style={{
                 background: hasKey ? theme.accent : theme.chip,
                 color: hasKey ? theme.bg : theme.textMuted,
@@ -370,7 +377,7 @@ export default function CompareView({ papers, onSelectPaper, hasKey, onConnect, 
                 opacity: contradictionsLoading ? 0.7 : 1,
               }}
             >
-              {contradictionsLoading ? "Analysing…" : "Find contradictions ✦"}
+              {contradictionsLoading ? "Analysing…" : "Run comparison ✦"}
             </button>
           </div>
         )}
@@ -605,7 +612,7 @@ function ContradictionsPanel({ data, loading, error, theme, onDismiss }) {
             textTransform: "uppercase",
           }}
         >
-          AI contradiction check
+          AI comparison
         </span>
         <button
           onClick={onDismiss}
@@ -803,8 +810,9 @@ function PickerPanel({
   filterAuthor, setFilterAuthor,
   filterStatus, setFilterStatus,
   filterTag, setFilterTag,
+  filterProject, setFilterProject,
   clearFilters, filtersActive,
-  years, authors, tagsList,
+  years, authors, tagsList, projectsList = [],
   maxReached,
 }) {
   const selectStyle = {
@@ -906,6 +914,17 @@ function PickerPanel({
               ))}
             </select>
           </div>
+          {projectsList.length > 0 && (
+            <div style={{ gridColumn: "1 / span 2" }}>
+              <label style={labelStyle}>Project</label>
+              <select value={filterProject} onChange={(e) => setFilterProject(e.target.value)} style={selectStyle}>
+                <option value="all">Any project</option>
+                {projectsList.map((proj) => (
+                  <option key={proj.id} value={proj.id}>{proj.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "0.66rem", color: theme.textMuted }}>
           <span>{papers.length} of {allCount} papers</span>

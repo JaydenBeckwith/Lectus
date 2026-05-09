@@ -24,8 +24,15 @@ export const enrichFromCitation = (...a) => choose().enrichFromCitation(...a);
 export const deepenSection = (...a) => choose().deepenSection(...a);
 export const suggestTags = (...a) => choose().suggestTags(...a);
 
-// PDF: always Anthropic (Puter doesn't accept raw PDFs via chat).
+// Native PDF (binary): only Anthropic accepts raw PDFs. Caller checks for
+// hasAnthropicKey before invoking this; without a key Anthropic 401s and
+// the UX is bad. Use extractPaperFromText for the keyless fallback.
 export const extractPaperFromPdf = (b) => anthropic.extractPaperFromPdf(b);
+
+// Plain-text variant. Routed to whichever provider is currently selected.
+// The caller is expected to have already extracted text from a PDF (e.g.
+// via src/utils/pdfText.js) so this works with the free Puter provider.
+export const extractPaperFromText = (text) => choose().extractPaperFromText(text);
 
 export const testConnection = () => choose().testConnection();
 
@@ -34,4 +41,12 @@ export const hasAccess = () => (provider === "puter" ? puter.hasApiKey() : anthr
 
 // Re-export the per-provider config setters so Settings can drive them.
 export { setRuntimeApiKey, hasApiKey as hasAnthropicKey } from "./anthropic";
-export { setPuterModel, getPuterModel, PUTER_MODELS } from "./puter";
+export {
+  setPuterModel,
+  getPuterModel,
+  PUTER_MODELS,
+  isPuterSignedIn,
+  getPuterUser,
+  puterSignIn,
+  puterSignOut,
+} from "./puter";

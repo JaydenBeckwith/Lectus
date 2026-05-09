@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import TagEditor from "./TagEditor";
+import { ConfirmModal } from "./Modal";
 
 // Detail view for a single paper: status, abstract, key findings,
 // highlights and personal notes. Triggers a chat query via onAskAI.
@@ -12,7 +13,10 @@ export default function PaperDetail({
   onAskAI,
   onSuggestTags,
   onDeepenSection,
+  onAttachPdf,
   hasKey,
+  hasAnthropicKey = false,
+  onConnect,
   projects = [],
   onToggleProject,
   theme,
@@ -20,6 +24,32 @@ export default function PaperDetail({
   const [editingNotes, setEditingNotes] = useState(false);
   const [tempNotes, setTempNotes] = useState("");
   const [newHighlight, setNewHighlight] = useState("");
+
+  const pdfInputRef = useRef(null);
+  const [pdfStatus, setPdfStatus] = useState("");
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const handlePdfPicked = async (e) => {
+    const file = e.target.files?.[0];
+    if (pdfInputRef.current) pdfInputRef.current.value = "";
+    if (!file || !onAttachPdf) return;
+    setPdfBusy(true);
+    setPdfStatus(
+      hasAnthropicKey
+        ? "Claude is reading the PDF (full fidelity)…"
+        : "Extracting text from PDF (PDF.js) and summarising…"
+    );
+    try {
+      await onAttachPdf(file);
+      setPdfStatus("✓ Sections updated from PDF");
+    } catch (err) {
+      setPdfStatus("Error: " + (err?.message || "Could not extract from PDF"));
+    } finally {
+      setPdfBusy(false);
+      setTimeout(() => setPdfStatus(""), 5000);
+    }
+  };
 
   const addHighlight = () => {
     const h = newHighlight.trim();
@@ -96,7 +126,7 @@ export default function PaperDetail({
         ))}
       </div>
 
-      <div style={{ display: "flex", gap: "0.75rem", marginBottom: "1rem", flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: "0.75rem", marginBottom: "1rem", flexWrap: "wrap", alignItems: "center" }}>
         <span
           style={{
             fontSize: "0.75rem",
@@ -121,7 +151,56 @@ export default function PaperDetail({
         >
           DOI: {paper.doi}
         </span>
+
+        {onAttachPdf && (
+          <>
+            <button
+              onClick={() => pdfInputRef.current?.click()}
+              disabled={pdfBusy}
+              title={
+                hasAnthropicKey
+                  ? "Attach a PDF — Claude reads the full PDF (figures, tables, layout) and refills methods/results/discussion."
+                  : "Attach a PDF — extracted to text via PDF.js, then summarised by your selected provider (free Puter is fine). Add an Anthropic key in Settings for higher-fidelity extraction."
+              }
+              style={{
+                background: theme.chip,
+                border: `1px solid ${theme.chipBorder}`,
+                color: theme.accent,
+                borderRadius: 6,
+                padding: "0.25rem 0.65rem",
+                fontSize: "0.72rem",
+                cursor: pdfBusy ? "wait" : "pointer",
+                opacity: pdfBusy ? 0.7 : 1,
+              }}
+            >
+              {pdfBusy ? "Extracting…" : "📄 Attach PDF"}
+            </button>
+            <input
+              ref={pdfInputRef}
+              type="file"
+              accept="application/pdf"
+              onChange={handlePdfPicked}
+              style={{ display: "none" }}
+              disabled={pdfBusy}
+            />
+          </>
+        )}
       </div>
+      {pdfStatus && (
+        <div
+          style={{
+            fontSize: "0.72rem",
+            color: pdfStatus.startsWith("✓") ? "#6a9060" : pdfStatus.startsWith("Error") ? "#c47a6e" : theme.accent,
+            marginTop: "-0.5rem",
+            marginBottom: "1rem",
+            lineHeight: 1.5,
+            whiteSpace: "pre-wrap",
+            maxWidth: 720,
+          }}
+        >
+          {pdfStatus}
+        </div>
+      )}
 
       {/* Tags — editable, with optional AI suggestion */}
       <div style={{ marginBottom: "1.25rem" }}>
@@ -401,15 +480,7 @@ export default function PaperDetail({
 
         {onDelete && (
           <button
-            onClick={() => {
-              if (
-                window.confirm(
-                  `Delete "${paper.title}"?\n\nThis removes the paper, your notes, and your highlights from the library. This can't be undone unless you have a JSON backup.`
-                )
-              ) {
-                onDelete(paper.id);
-              }
-            }}
+            onClick={() => setConfirmDelete(true)}
             style={{
               background: "transparent",
               border: `1px solid #c47a6e55`,
@@ -430,6 +501,20 @@ export default function PaperDetail({
           </button>
         )}
       </div>
+
+      <ConfirmModal
+        open={confirmDelete}
+        title={`Delete "${paper.title}"?`}
+        message={"This removes the paper, your notes, and your highlights from the library. This can't be undone unless you have a JSON backup."}
+        confirmLabel="Delete paper"
+        danger
+        onConfirm={() => {
+          setConfirmDelete(false);
+          if (onDelete) onDelete(paper.id);
+        }}
+        onCancel={() => setConfirmDelete(false)}
+        theme={theme}
+      />
     </div>
   );
 }

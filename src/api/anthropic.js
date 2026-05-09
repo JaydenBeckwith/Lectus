@@ -1,6 +1,7 @@
 import {
   SYSTEM_PROMPT,
   PDF_EXTRACT_PROMPT,
+  pdfTextExtractPrompt,
   reviewPrompt,
   structuredReviewPrompt,
   tagSuggestionPrompt,
@@ -48,6 +49,20 @@ const post = async (body) => {
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
+    // Surface the most common failure modes in plain language so the user
+    // knows what to fix without having to read the raw JSON.
+    if (res.status === 401 || res.status === 403) {
+      throw new Error(
+        "Anthropic rejected the API key (HTTP " + res.status + "). " +
+        "Open Settings → API key, paste a fresh key (starts with `sk-ant-…`), and try again. " +
+        "If you're using the free Puter provider for chat, note that PDF extraction still needs your own Anthropic key — Puter's chat API can't accept raw PDFs."
+      );
+    }
+    if (res.status === 429) {
+      throw new Error(
+        "Anthropic rate-limited this request (HTTP 429). Wait a minute or check your usage limits, then retry."
+      );
+    }
     throw new Error(`Anthropic API ${res.status}: ${text || res.statusText}`);
   }
   return res.json();
@@ -137,6 +152,19 @@ const normalisePaper = (p) => ({
   results: typeof p.results === "string" ? p.results : "",
   discussion: typeof p.discussion === "string" ? p.discussion : "",
 });
+
+// Text-input variant. Used when the PDF was already parsed client-side via
+// PDF.js. Same JSON shape as extractPaperFromPdf so the caller can use them
+// interchangeably.
+export const extractPaperFromText = async (text) => {
+  const data = await post({
+    model: MODEL,
+    max_tokens: 4500,
+    messages: [{ role: "user", content: pdfTextExtractPrompt(text) }],
+  });
+  const raw = data.content?.[0]?.text || "";
+  return normalisePaper(extractJson(raw));
+};
 
 export const extractPaperFromPdf = async (base64Pdf) => {
   // 4500 tokens leaves enough headroom for abstract + methods + results +

@@ -9,6 +9,7 @@ import {
   generateStructuredReview,
   enrichFromCitation,
   deepenSection,
+  extractPaperFromText,
   setRuntimeApiKey,
   setProvider,
   setPuterModel,
@@ -25,6 +26,8 @@ import { getApiKey, setApiKey, clearApiKey } from "./storage/secrets";
 import { isElectron, saveLibraryToFile, loadLibraryFromFile } from "./storage/electronFile";
 import useDebouncedEffect from "./hooks/useDebouncedEffect";
 import { papersToBibtex, parseBibtex } from "./utils/bibtex";
+import { parseEndnoteOrRis, detectEndnoteFormat } from "./utils/endnote";
+import { extractTextFromPdf } from "./utils/pdfText";
 
 import TopBar from "./components/TopBar";
 import LibraryView from "./components/LibraryView";
@@ -164,25 +167,79 @@ export default function App() {
     savedTimerRef.current = setTimeout(() => setSaveState("idle"), 1400);
   };
 
+  // Hold a ref to the latest values so the save-now flush (called from
+  // beforeunload / before-quit) doesn't race with React's stale closures.
+  const latest = useRef({ papers, projects, prefs: null });
+  latest.current = {
+    papers,
+    projects,
+    prefs: { themeKey, accentColor, onboardingSeen, activeProjectId, provider: providerState, puterModel: puterModelState },
+  };
+
+  // Synchronous-as-possible save. Returns a promise that resolves after
+  // both IDB and the Electron file backup have settled. Used for the
+  // debounced effect AND the quit handshake.
+  const saveNow = async () => {
+    const { papers: ps, projects: prs, prefs } = latest.current;
+    setSaveState("saving");
+    try {
+      await Promise.all([
+        savePapers(ps),
+        prefs ? savePrefs(prefs) : Promise.resolve(),
+        saveProjects(prs),
+        isElectron() ? saveLibraryToFile(ps) : Promise.resolve(),
+      ]);
+      flashSaved();
+    } catch {
+      setSaveState("error");
+    }
+  };
+
   useDebouncedEffect(() => {
     if (!hydrated) return;
     if (skipNextSave.current) { skipNextSave.current = false; return; }
-    setSaveState("saving");
-    (async () => {
-      try { await savePapers(papers); if (isElectron()) await saveLibraryToFile(papers); flashSaved(); }
-      catch { setSaveState("error"); }
-    })();
-  }, [papers, hydrated], 400);
+    saveNow();
+  }, [papers, hydrated], 150);
 
   useDebouncedEffect(() => {
     if (!hydrated) return;
     savePrefs({ themeKey, accentColor, onboardingSeen, activeProjectId, provider: providerState, puterModel: puterModelState });
-  }, [themeKey, accentColor, onboardingSeen, activeProjectId, providerState, puterModelState, hydrated], 250);
+  }, [themeKey, accentColor, onboardingSeen, activeProjectId, providerState, puterModelState, hydrated], 200);
 
   useDebouncedEffect(() => {
     if (!hydrated) return;
     saveProjects(projects);
-  }, [projects, hydrated], 300);
+  }, [projects, hydrated], 200);
+
+  // Flush on close. Two paths:
+  //   1. Browser / Electron renderer: window 'beforeunload' fires when the
+  //      tab closes or reloads. We trigger savePapers (IndexedDB is
+  //      synchronous-enough during unload).
+  //   2. Electron main process: emits 'lectus:flushBeforeQuit' and waits
+  //      for our acknowledgement before actually quitting. We do the
+  //      proper async save and ack when it resolves.
+  useEffect(() => {
+    if (!hydrated) return;
+    const onUnload = () => {
+      // Don't await — beforeunload doesn't honour async, but kicking the
+      // saves off lets IDB persist whatever it can synchronously.
+      saveNow();
+    };
+    window.addEventListener("beforeunload", onUnload);
+    let unsubscribe = null;
+    if (typeof window !== "undefined" && window.lectus?.onFlushBeforeQuit) {
+      unsubscribe = window.lectus.onFlushBeforeQuit(async () => {
+        await saveNow();
+        window.lectus.acknowledgeFlush();
+      });
+    }
+    return () => {
+      window.removeEventListener("beforeunload", onUnload);
+      if (unsubscribe) unsubscribe();
+    };
+    // saveNow always reads from `latest` — no deps needed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated]);
 
   const openOnboarding = () => setShowOnboarding(true);
   const dismissOnboarding = () => { setShowOnboarding(false); setOnboardingSeen(true); };
@@ -337,14 +394,64 @@ export default function App() {
     if (text) updatePaper(paperId, { [section]: text });
   };
 
+  // Attach a PDF to an existing paper and re-fill the AI-extractable fields
+  // from the full text. We deliberately preserve the user's hand-edits
+  // (notes, highlights, status, projects, tags) and only OVERWRITE the
+  // AI-derived prose sections (methods / results / discussion / keyFindings),
+  // because those are the whole reason the user is attaching the PDF —
+  // they're upgrading from "guessed from abstract" to "derived from full
+  // paper". The abstract itself is only filled if currently empty.
+  const attachPdfToPaper = async (paperId, file) => {
+    if (!file) throw new Error("No file provided");
+    if (file.type !== "application/pdf") throw new Error("Please pick a PDF file");
+    const target = papers.find((p) => p.id === paperId);
+    if (!target) throw new Error("Paper not found");
+    const extracted = await extractFromPdfFile(file);
+    const updates = {
+      // Always upgrade these from the full paper.
+      methods: extracted.methods || target.methods || "",
+      results: extracted.results || target.results || "",
+      discussion: extracted.discussion || target.discussion || "",
+      keyFindings:
+        Array.isArray(extracted.keyFindings) && extracted.keyFindings.length
+          ? extracted.keyFindings
+          : target.keyFindings || [],
+      // Fill in only when missing.
+      abstract: target.abstract && target.abstract.trim() ? target.abstract : extracted.abstract || "",
+      doi: target.doi || extracted.doi || "",
+      journal: target.journal || extracted.journal || "",
+      year: target.year || extracted.year || null,
+    };
+    updatePaper(paperId, updates);
+    return updates;
+  };
+
+  // Run a PDF through the best available extraction path. With an Anthropic
+  // key we send the raw PDF binary to Claude (highest fidelity — figures,
+  // tables, layout). Without one, we PDF.js-extract the text in the browser
+  // and send that to whichever provider is currently selected (Puter works
+  // out of the box). Both paths return the same paper-shaped JSON.
+  const extractFromPdfFile = async (file, onStatus) => {
+    if (apiKey) {
+      onStatus?.("Claude is reading the PDF (full fidelity)…");
+      const base64 = await readAsBase64(file);
+      return extractPaperFromPdf(base64);
+    }
+    onStatus?.("Extracting text from PDF (PDF.js)…");
+    const text = await extractTextFromPdf(file);
+    if (!text || text.trim().length < 100) {
+      throw new Error("Could not extract any text from this PDF (it may be scanned/image-only — OCR isn't supported).");
+    }
+    onStatus?.("AI summarising methods, results, discussion from the text…");
+    return extractPaperFromText(text);
+  };
+
   const handlePdfUpload = async (file) => {
     if (!file) return;
     if (file.type !== "application/pdf") { setPdfStatus("Please upload a PDF file"); return; }
     setPdfLoading(true); setPdfStatus("Reading PDF...");
     try {
-      const base64 = await readAsBase64(file);
-      setPdfStatus("AI extracting metadata, methods, results, discussion...");
-      const parsed = await extractPaperFromPdf(base64);
+      const parsed = await extractFromPdfFile(file, setPdfStatus);
       const newPaper = { id: `p${Date.now()}`, ...parsed, notes: "", highlights: [], status: "to-read", projects: projectStamp() };
       setPapers((prev) => [newPaper, ...prev]);
       setPdfStatus(`✓ Added "${parsed.title.slice(0, 40)}..."`);
@@ -352,7 +459,7 @@ export default function App() {
     } catch (err) {
       setPdfStatus(`Error processing PDF: ${err.message}`);
       setPdfLoading(false);
-      setTimeout(() => setPdfStatus(""), 3000);
+      setTimeout(() => setPdfStatus(""), 5000);
     }
   };
 
@@ -422,11 +529,34 @@ export default function App() {
     }
     return { next, added, skipped };
   };
+  // Dispatch to the right parser based on file extension first, then on the
+  // content sniff. Supported: JSON backup, BibTeX (.bib), EndNote tagged
+  // (.enw), RIS (.ris). EndNote and RIS share a parser that auto-detects
+  // the dialect.
+  //
+  // .enl is the raw EndNote library file — it's an internal SQLite wrapper
+  // around a sibling .Data folder and only EndNote can read it. We accept
+  // it in the picker so users know it's been seen, then guide them to
+  // export to a format we can read.
   const handleImportFile = async (file) => {
-    const text = await readAsText(file);
     const lower = file.name.toLowerCase();
+
+    if (lower.endsWith(".enl")) {
+      throw new Error(
+        "EndNote .enl libraries are an internal SQLite database that only EndNote can read. " +
+        "Open the library in EndNote → File → Export → choose RIS or EndNote Export (.enw) → save the file, then drop the export here."
+      );
+    }
+
+    const text = await readAsText(file);
     let incoming = [];
-    if (lower.endsWith(".json") || text.trim().startsWith("{")) {
+
+    const isJson = lower.endsWith(".json") || text.trim().startsWith("{");
+    const isEnwExt = lower.endsWith(".enw") || lower.endsWith(".ris") || lower.endsWith(".txt");
+    const enwFmt = isEnwExt ? detectEndnoteFormat(text) : null;
+    const isBibExt = lower.endsWith(".bib") || lower.endsWith(".bibtex");
+
+    if (isJson) {
       const parsed = JSON.parse(text);
       const list = Array.isArray(parsed) ? parsed : parsed.papers;
       if (!Array.isArray(list)) throw new Error("JSON has no `papers` array");
@@ -435,7 +565,19 @@ export default function App() {
         ...p,
         id: p.id || `p${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       }));
-    } else { incoming = parseBibtex(text); }
+    } else if (enwFmt) {
+      incoming = parseEndnoteOrRis(text);
+      if (!incoming.length) throw new Error("No records found in EndNote/RIS file");
+    } else if (isBibExt) {
+      incoming = parseBibtex(text);
+    } else {
+      // Unknown extension — sniff the content. Try EndNote/RIS first, then
+      // BibTeX as a last resort.
+      const sniffed = detectEndnoteFormat(text);
+      if (sniffed) incoming = parseEndnoteOrRis(text);
+      else incoming = parseBibtex(text);
+    }
+
     const { next, added, skipped } = mergePapers(papers, incoming);
     setPapers(next);
     return { added, skipped };
@@ -477,10 +619,10 @@ export default function App() {
       {view === "library" && <LibraryView papers={papers} filtered={filtered} search={search} setSearch={setSearch} activeTag={activeTag} setActiveTag={setActiveTag} statusFilter={statusFilter} setStatusFilter={setStatusFilter} allTags={allTags} statusColors={statusColors} onSelectPaper={openPaper} projects={projects} activeProjectId={activeProjectId} setActiveProjectId={setActiveProjectId} onCreateProject={createProject} onRenameProject={renameProject} onDeleteProject={deleteProject} onAddPaperToProject={addPaperToProject} onExportBibtex={exportBibtex} onExportJson={exportJson} onImportFile={handleImportFile} onLoadExamples={loadExamples} theme={theme} />}
       {view === "graph" && <GraphView papers={papers} onSelectPaper={openPaper} theme={theme} />}
       {view === "timeline" && <TimelineView papers={papers} onSelectPaper={openPaper} theme={theme} />}
-      {view === "compare" && <CompareView papers={papers} onSelectPaper={openPaper} hasKey={providerState === "puter" || Boolean(apiKey)} onConnect={openOnboarding} theme={theme} />}
-      {view === "paper" && selected && <PaperDetail paper={selected} statusColors={statusColors} onUpdate={updatePaper} onDelete={deletePaper} onBack={() => setView("library")} onAskAI={askAIAboutPaper} onSuggestTags={(p) => suggestTags(p, p.tags)} onDeepenSection={(section) => deepenPaperSection(selected.id, section)} hasKey={providerState === "puter" || Boolean(apiKey)} projects={projects} onToggleProject={togglePaperInProject} theme={theme} />}
+      {view === "compare" && <CompareView papers={papers} onSelectPaper={openPaper} hasKey={providerState === "puter" || Boolean(apiKey)} onConnect={openOnboarding} projects={projects} theme={theme} />}
+      {view === "paper" && selected && <PaperDetail paper={selected} statusColors={statusColors} onUpdate={updatePaper} onDelete={deletePaper} onBack={() => setView("library")} onAskAI={askAIAboutPaper} onSuggestTags={(p) => suggestTags(p, p.tags)} onDeepenSection={(section) => deepenPaperSection(selected.id, section)} onAttachPdf={(file) => attachPdfToPaper(selected.id, file)} hasKey={providerState === "puter" || Boolean(apiKey)} hasAnthropicKey={Boolean(apiKey)} onConnect={openOnboarding} projects={projects} onToggleProject={togglePaperInProject} theme={theme} />}
       {view === "chat" && <ChatView papers={papers} messages={messages} loading={loading} chatInput={chatInput} setChatInput={setChatInput} onSend={sendChat} hasKey={providerState === "puter" || Boolean(apiKey)} onConnect={openOnboarding} theme={theme} />}
-      {view === "review" && <ReviewView papers={papers} reviewSelection={reviewSelection} setReviewSelection={setReviewSelection} reviewTopic={reviewTopic} setReviewTopic={setReviewTopic} reviewMode={reviewMode} setReviewMode={setReviewMode} reviewOutput={reviewOutput} reviewStructured={reviewStructured} reviewLoading={reviewLoading} reviewError={reviewError} onGenerate={generateReview} hasKey={providerState === "puter" || Boolean(apiKey)} onConnect={openOnboarding} theme={theme} />}
+      {view === "review" && <ReviewView papers={papers} reviewSelection={reviewSelection} setReviewSelection={setReviewSelection} reviewTopic={reviewTopic} setReviewTopic={setReviewTopic} reviewMode={reviewMode} setReviewMode={setReviewMode} reviewOutput={reviewOutput} reviewStructured={reviewStructured} reviewLoading={reviewLoading} reviewError={reviewError} onGenerate={generateReview} hasKey={providerState === "puter" || Boolean(apiKey)} onConnect={openOnboarding} projects={projects} theme={theme} />}
       {view === "add" && <AddView pdfLoading={pdfLoading} pdfStatus={pdfStatus} onPdfUpload={handlePdfUpload} onDoiLookup={handleDoiLookup} hasKey={providerState === "puter" || Boolean(apiKey)} onConnect={openOnboarding} theme={theme} />}
       {view === "settings" && <SettingsView themeKey={themeKey} setThemeKey={setThemeKey} accentColor={accentColor} setAccentColor={setAccentColor} papers={papers} apiKey={apiKey} apiKeySource={apiKeySource} onSaveApiKey={handleSaveApiKey} onClearApiKey={handleClearApiKey} onTestApiKey={testConnection} provider={providerState} onSetProvider={handleSetProvider} puterModel={puterModelState} onSetPuterModel={handleSetPuterModel} puterModels={PUTER_MODELS} onExportBibtex={exportBibtex} onExportJson={exportJson} onImportFile={handleImportFile} onLoadExamples={loadExamples} theme={theme} />}
 
