@@ -9,6 +9,7 @@
 
 import {
   SYSTEM_PROMPT,
+  pdfTextExtractPrompt,
   reviewPrompt,
   structuredReviewPrompt,
   tagSuggestionPrompt,
@@ -16,6 +17,21 @@ import {
   enrichFromCitationPrompt,
   sectionDeepenPrompt,
 } from "../constants/prompts";
+
+// Same shape as anthropic.normalisePaper — keep them in sync.
+const normalisePaper = (p) => ({
+  title: p.title || "(untitled)",
+  authors: p.authors || "Unknown",
+  journal: p.journal || "",
+  year: p.year || null,
+  doi: p.doi || "",
+  tags: Array.isArray(p.tags) ? p.tags : [],
+  abstract: p.abstract || "",
+  keyFindings: Array.isArray(p.keyFindings) ? p.keyFindings : [],
+  methods: typeof p.methods === "string" ? p.methods : "",
+  results: typeof p.results === "string" ? p.results : "",
+  discussion: typeof p.discussion === "string" ? p.discussion : "",
+});
 
 export const PUTER_MODELS = [
   { id: "gpt-5-nano", label: "GPT-5 Nano (fast, cheap)" },
@@ -132,11 +148,23 @@ export const suggestTags = async (paper, existing = []) => {
   }
 };
 
-// PDF extraction needs vision/file support — Puter's chat API doesn't accept
-// raw base64 PDFs directly, so for now we route PDF uploads through the
-// Anthropic client. The router in api/llm.js handles that fallback.
+// Puter's chat API can't accept raw PDF binaries, but it can accept text.
+// The caller (App.jsx) is expected to PDF.js-extract the text first and
+// then call this — see src/utils/pdfText.js. Quality is slightly lower
+// than Claude reading the actual PDF (figures, tables, layout are lost).
+export const extractPaperFromText = async (text) => {
+  ensurePuter();
+  const res = await window.puter.ai.chat(pdfTextExtractPrompt(text), { model });
+  return normalisePaper(extractJson(extractText(res)));
+};
+
+// Native PDF (binary) extraction is unavailable on Puter. The router in
+// api/llm.js prefers this when no Anthropic key is around but routes to
+// Anthropic when it is.
 export const extractPaperFromPdf = async () => {
-  throw new Error("PDF extraction needs the Anthropic key — switch provider in Settings.");
+  throw new Error(
+    "Puter's chat API can't read raw PDF binaries. Use extractPaperFromText with PDF.js text instead, or add an Anthropic key in Settings for native PDF extraction."
+  );
 };
 
 export const testConnection = async () => {
@@ -148,3 +176,45 @@ export const testConnection = async () => {
 
 // Stub setRuntimeApiKey so the router can call it uniformly.
 export const setRuntimeApiKey = () => {};
+
+// ── Puter account auth ──────────────────────────────────────────────────────
+// Anonymous Puter users get a small free quota and hit a "Low balance" modal
+// quickly. Signing in to puter.com gives the user their own account quota
+// and lets them top up. The auth popup is whitelisted in the Electron
+// window-open handler (electron/main.cjs) so it opens inside the app.
+
+export const isPuterSignedIn = () => {
+  if (typeof window === "undefined" || !window.puter?.auth) return false;
+  try {
+    // puter.auth.isSignedIn is synchronous in current versions.
+    const v = window.puter.auth.isSignedIn();
+    return Boolean(v);
+  } catch {
+    return false;
+  }
+};
+
+export const getPuterUser = async () => {
+  if (typeof window === "undefined" || !window.puter?.auth) return null;
+  if (!isPuterSignedIn()) return null;
+  try {
+    // getUser is async on newer Puter versions, sync on older — handle both.
+    const u = window.puter.auth.getUser();
+    if (u && typeof u.then === "function") return await u;
+    return u || null;
+  } catch {
+    return null;
+  }
+};
+
+export const puterSignIn = async () => {
+  ensurePuter();
+  if (!window.puter.auth?.signIn) throw new Error("Puter auth not available — refresh and try again.");
+  return window.puter.auth.signIn();
+};
+
+export const puterSignOut = async () => {
+  ensurePuter();
+  if (!window.puter.auth?.signOut) return;
+  return window.puter.auth.signOut();
+};

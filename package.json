@@ -1,7 +1,8 @@
 {
   "name": "lectus",
   "private": true,
-  "version": "0.7.0",
+  "version": "1.0.0",
+  "author": "Jayden Beckwith",
   "type": "module",
   "description": "An AI-assisted research paper library for organising, visualising, and synthesising scientific literature.",
   "main": "electron/main.cjs",
@@ -16,6 +17,7 @@
     "electron:build": "vite build && electron-builder --win"
   },
   "dependencies": {
+    "pdfjs-dist": "^4.7.76",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^9.0.1",
@@ -44,6 +46,8 @@
       "electron/**/*"
     ],
     "win": {
+      "icon": "public/lectus_icon.png",
+      "artifactName": "Lectus-Setup-${version}.${ext}",
       "target": [
         {
           "target": "nsis",
@@ -56,7 +60,11 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "perMachine": false
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Lectus",
+      "uninstallDisplayName": "Lectus ${version}"
     }
   },
   "optionalDependencies": {

@@ -18,7 +18,8 @@ Lectus is a local-first desktop research assistant - your papers, notes, and API
 - **Compare** side-by-side comparison of 2-4 papers across abstract, methods, results, discussion, key findings, tags, highlights, and notes — with an on-demand AI contradiction check.
 - **Ask** chat with Claude about your library (notes and highlights included as context).
 - **Review** generate a literature-review paragraph or a structured synthesis (agreements / contradictions / gaps / future directions / per-paper contributions).
-- **Add** drop a PDF, AI extracts title, authors, journal, year, DOI, tags, abstract, key findings, plus methods, results, and discussion summaries (collapsed by default in the paper view).
+- **Add** drop a PDF, AI extracts title, authors, journal, year, DOI, tags, abstract, key findings, plus methods, results, and discussion summaries (collapsed by default in the paper view). For papers added by DOI, click "Attach PDF" on the paper view later to upgrade the AI-derived sections from full text. With an Anthropic key the PDF is read natively (figures and layout). Without one, the text is extracted in-browser via PDF.js and summarised via the free Puter provider.
+- **Import** existing libraries from BibTeX (`.bib`), EndNote tagged (`.enw`), RIS (`.ris`), or a Lectus JSON backup. Duplicates are skipped by DOI or title. Raw EndNote `.enl` libraries are recognised but require a one-step export (EndNote → File → Export → RIS or EndNote Export) since `.enl` is an EndNote-internal SQLite wrapper.
 - **Persistent local storage** papers, notes, highlights, and theme preferences are saved to IndexedDB and survive refreshes.
 - **Desktop app** runs as a packaged Windows `.exe` via Electron, fully local - no browser required.
 - **Themes** Midnight, Parchment, Ocean, Forest. Custom accent colour.
@@ -26,7 +27,7 @@ Lectus is a local-first desktop research assistant - your papers, notes, and API
 
 ## AI Providers
 
-Lectus supports multiple AI backends. It uses a built-in free provider via **Puter.js** to start asking questions immediately, so there's no API key needed.
+Lectus supports multiple AI backends. It uses a built-in free provider via **Puter.js** to start asking questions immediately, so there's no API key needed. The first AI call opens a Puter sign-in popup (continue as guest is fine); the desktop build hosts that popup inside Electron so the session persists between launches.
 
 ### Bring your own API key (recommended)
 For higher performance and reliability, connect your own provider:
@@ -114,11 +115,45 @@ src/
 | `npm test`               | Run the Vitest unit-test suite once (used by CI).              |
 | `npm run test:watch`     | Run Vitest in watch mode for local development.                |
 | `npm run electron:dev`   | Launch Vite + Electron together (auto-reload, devtools open).  |
-| `npm run electron:build` | Build the Vite bundle, then package a Windows `.exe` installer. |
+| `npm run electron:build` | Build the Vite bundle, then package a Windows installer at `release/Lectus-Setup-<version>.exe`. |
 
 ## Desktop build
 
 `npm run electron:build` outputs a Windows installer to `release/`. The default target is NSIS x64; tweak `build.win.target` in `package.json` to add `portable`, `msi`, or other architectures. Building Windows installers requires running on Windows (or wine).
+
+## Distributing the installer
+
+The packaged installer lives at `release/Lectus-Setup-<version>.exe` after a
+successful `npm run electron:build`. To put it on someone else's machine:
+
+1. Copy that single `.exe` to the target machine — it's everything they need
+   (Electron runtime, Lectus assets, and the NSIS installer are all bundled).
+2. Double-click to install. The installer is per-user (no admin needed) and
+   asks where to install. It creates Start menu and desktop shortcuts.
+3. The first launch loads with an empty library. Either drop in a saved
+   `lectus-backup-*.json` via Library → Load library, or paste a DOI / drop
+   a PDF in the Add tab.
+4. Library state persists in `%APPDATA%/Lectus/lectus-library.json` and in
+   IndexedDB. The before-quit handshake flushes pending edits before the
+   process exits, and the JSON file mirrors every save for portability.
+
+### A note on Windows SmartScreen
+
+The build is **not code-signed**. The first time anyone runs the installer
+Windows will show a blue SmartScreen dialog ("Windows protected your PC")
+because the publisher is unknown. The user clicks **More info → Run
+anyway** to proceed. This is normal for unsigned apps. To suppress the
+warning, sign the installer with an EV code-signing certificate (~$300/yr
+from Sectigo, DigiCert etc.) — the configuration hooks for `certificateFile`
+/ `certificatePassword` are documented in the
+[electron-builder docs](https://www.electron.build/code-signing).
+
+### Building on macOS / Linux
+
+Cross-building Windows installers requires either a Windows machine or
+[wine](https://www.electron.build/multi-platform-build) installed locally.
+Easier path for cross-platform releases: run `npm run electron:build` from
+GitHub Actions on a `windows-latest` runner.
 
 ## Testing & CI
 
@@ -129,6 +164,7 @@ pure modules where regressions are cheapest to catch:
 - `src/constants/tagColors.test.js` — deterministic hash-to-hex tag colours.
 - `src/constants/prompts.test.js` — prompt builders include the right fields.
 - `src/utils/bibtex.test.js` — BibTeX serialise + parse round-trip.
+- `src/utils/endnote.test.js` — EndNote (`.enw`) and RIS (`.ris`) parsing, including the auto-detect dialect sniff.
 - `src/utils/graph.test.js` — shared-tag edge construction and layout bounds.
 - `src/utils/format.test.js` — chat markdown helper.
 - `src/api/openalex.test.js` — abstract reconstruction from the inverted index.

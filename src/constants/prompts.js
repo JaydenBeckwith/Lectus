@@ -74,6 +74,25 @@ export const tagSuggestionPrompt = (paper, existing = []) =>
   (paper.keyFindings?.length ? "Key findings: " + paper.keyFindings.join("; ") + "\n" : "") +
   (existing?.length ? "Existing tags (do NOT repeat these): " + existing.join(", ") : "");
 
+// Same schema as PDF_EXTRACT_PROMPT below, but adapted for the case where
+// we've already extracted plain text from the PDF (via PDF.js, in the
+// browser) and are passing that text to a chat-only provider like Puter.
+// Quality is slightly lower than Claude reading the actual PDF because
+// figures, tables and complex layout are lost — but it works without an
+// Anthropic API key.
+export const pdfTextExtractPrompt = (text) =>
+  "You will extract structured metadata from the full text of an academic paper provided below. Return ONLY a JSON object (no markdown fences, no commentary):\n" +
+  '{"title":"...","authors":"First Author, Second Author, et al.","journal":"...","year":2024,"doi":"...","tags":["tag1","tag2","tag3","tag4","tag5"],"abstract":"...","keyFindings":["finding 1","finding 2","finding 3"],"methods":"...","results":"...","discussion":"..."}\n\n' +
+  "Rules:\n" +
+  "- Tags: 4-6 scientific keywords. Key findings: 3 short statements (max 12 words each).\n" +
+  "- abstract: copy the paper's abstract verbatim if you can locate it, otherwise a 3-5 sentence faithful summary.\n" +
+  "- methods / results / discussion: faithful 150-400 word summaries of the corresponding sections, drawn from the supplied text. Plain prose, no headings, no bullets.\n" +
+  '- If a section is genuinely absent (e.g. an editorial), set its value to "".\n' +
+  "- The text below was extracted from a PDF and may have figure captions, page numbers, headers/footers, and broken hyphenations interleaved. Use your judgement to ignore that noise.\n" +
+  "- Do NOT invent findings. Return ONLY the JSON.\n\n" +
+  "PAPER TEXT:\n" +
+  text;
+
 // Extracts metadata + the three substantive prose sections (methods, results,
 // discussion). Sections are stored as plain strings — no internal markdown —
 // so the UI can render them however it likes (collapsible blocks, etc.).
@@ -156,12 +175,15 @@ const SECTION_GUIDANCE = {
 };
 
 export const sectionDeepenPrompt = (paper, section) =>
-  "You are producing a longer, more detailed summary of the " + section.toUpperCase() +
-  " section of a single paper. Base your summary on the abstract supplied below, " +
-  "and on prior knowledge of this specific paper if you are confident — but do NOT invent results, mechanisms, or numbers.\n\n" +
+  "You are producing a focused summary of the " + section.toUpperCase() +
+  " section of a single paper. IMPORTANT: you do NOT have access to the full text — only the abstract supplied below and any prior knowledge you may already have of this specific paper. " +
+  "The user can attach the actual PDF for a full extraction; this prompt is the fallback for when they haven't.\n\n" +
   "Guidance for the " + section + " section: " + (SECTION_GUIDANCE[section] || "") + "\n\n" +
-  "Length: 200-450 words. Plain prose only — no headings, no bullets, no markdown. " +
-  "If the abstract is silent on this section AND you do not have reliable prior knowledge of this paper, return a single sentence noting that — do NOT speculate.\n\n" +
+  "Honesty rules:\n" +
+  "- Use ONLY information supported by the abstract or by clear prior knowledge of this exact paper. Do NOT invent results, mechanisms, sample sizes, or p-values.\n" +
+  "- Length: as much as the source supports — typically 100-450 words. If the abstract is thin on this section, write a shorter, faithful summary; do NOT pad.\n" +
+  "- If the source genuinely tells you nothing about this section, output one short sentence such as: \"The abstract does not describe the " + section + " section in detail. For a faithful summary, attach the full PDF.\" — do NOT speculate.\n" +
+  "- Plain prose only. No headings, no bullets, no markdown.\n\n" +
   "PAPER:\n" +
   "Title: " + (paper.title || "(unknown)") + "\n" +
   "Authors: " + (paper.authors || "(unknown)") + "\n" +

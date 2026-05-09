@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { THEMES } from "../constants/themes";
+import { isPuterSignedIn, getPuterUser, puterSignIn, puterSignOut } from "../api/llm";
 
 const ACCENT_SWATCHES = ["#c8a96e","#8b5a2b","#5fb3c4","#8fb572","#c47a6e","#9c7ac4","#c4a35f","#7ac49c"];
 
@@ -18,6 +19,59 @@ export default function SettingsView({
 
   useEffect(() => { setKeyDraft(apiKey || ""); }, [apiKey]);
   const dirty = keyDraft.trim() !== (apiKey || "");
+
+  // ── Puter auth state ──
+  const [puterUser, setPuterUser] = useState(null);     // { username, ... } | null
+  const [puterChecked, setPuterChecked] = useState(false);
+  const [puterBusy, setPuterBusy] = useState(false);
+  const [puterStatus, setPuterStatus] = useState("");
+
+  const refreshPuter = async () => {
+    try {
+      const u = isPuterSignedIn() ? await getPuterUser() : null;
+      setPuterUser(u || null);
+    } catch {
+      setPuterUser(null);
+    } finally {
+      setPuterChecked(true);
+    }
+  };
+  useEffect(() => {
+    refreshPuter();
+    // Re-check periodically while the Settings page is open in case the
+    // user signs in/out via the popup window.
+    const t = setInterval(refreshPuter, 2000);
+    return () => clearInterval(t);
+  }, []);
+
+  const handlePuterSignIn = async () => {
+    setPuterBusy(true);
+    setPuterStatus("Opening Puter sign-in…");
+    try {
+      await puterSignIn();
+      await refreshPuter();
+      setPuterStatus("✓ Signed in");
+    } catch (err) {
+      setPuterStatus("Error: " + (err?.message || "Sign-in failed"));
+    } finally {
+      setPuterBusy(false);
+      setTimeout(() => setPuterStatus(""), 3000);
+    }
+  };
+  const handlePuterSignOut = async () => {
+    setPuterBusy(true);
+    setPuterStatus("Signing out…");
+    try {
+      await puterSignOut();
+      await refreshPuter();
+      setPuterStatus("✓ Signed out");
+    } catch (err) {
+      setPuterStatus("Error: " + (err?.message || "Sign-out failed"));
+    } finally {
+      setPuterBusy(false);
+      setTimeout(() => setPuterStatus(""), 3000);
+    }
+  };
 
   const handleSaveKey = async () => {
     setKeyBusy(true);
@@ -96,8 +150,130 @@ export default function SettingsView({
                 <option key={m.id} value={m.id} style={{ background: theme.bg }}>{m.label}</option>
               ))}
             </select>
-            <div style={{ fontSize: "0.68rem", color: theme.textMuted, marginTop: "0.55rem", lineHeight: 1.55 }}>
-              Puter.js routes requests through <a href="https://puter.com" target="_blank" rel="noopener noreferrer" style={{ color: theme.accent, textDecoration: "underline" }}>puter.com</a>. PDF extraction still requires switching to Anthropic.
+
+            {/* Puter account auth — anonymous users hit a Low Balance wall
+                fast; signed-in users have their own account quota and can
+                top up via puter.com. */}
+            <div
+              style={{
+                marginTop: "0.85rem",
+                paddingTop: "0.8rem",
+                borderTop: `1px dashed ${theme.panelBorder}`,
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.5rem" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+                  <span
+                    style={{
+                      fontSize: "0.62rem",
+                      letterSpacing: "0.08em",
+                      textTransform: "uppercase",
+                      color: theme.textMuted,
+                    }}
+                  >
+                    Account
+                  </span>
+                  {!puterChecked ? (
+                    <span style={{ fontSize: "0.74rem", color: theme.textMuted, fontStyle: "italic" }}>checking…</span>
+                  ) : puterUser ? (
+                    <span
+                      title={puterUser.uuid || ""}
+                      style={{
+                        fontSize: "0.74rem",
+                        color: theme.textBright,
+                        background: theme.accent + "22",
+                        border: `1px solid ${theme.accent}66`,
+                        borderRadius: 12,
+                        padding: "0.18rem 0.55rem",
+                      }}
+                    >
+                      Signed in as {puterUser.username || "(unknown)"}
+                    </span>
+                  ) : (
+                    <span
+                      style={{
+                        fontSize: "0.74rem",
+                        color: theme.textSubtle,
+                        background: theme.chip,
+                        border: `1px solid ${theme.chipBorder}`,
+                        borderRadius: 12,
+                        padding: "0.18rem 0.55rem",
+                      }}
+                    >
+                      Anonymous (free guest quota)
+                    </span>
+                  )}
+                </div>
+                <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
+                  {puterUser ? (
+                    <>
+                      <a
+                        href="https://puter.com/?launch_app=puter-account"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          background: "transparent",
+                          border: `1px solid ${theme.panelBorder}`,
+                          color: theme.textSubtle,
+                          borderRadius: 8,
+                          padding: "0.32rem 0.7rem",
+                          fontSize: "0.72rem",
+                          textDecoration: "none",
+                        }}
+                      >
+                        Top up balance ↗
+                      </a>
+                      <button
+                        onClick={handlePuterSignOut}
+                        disabled={puterBusy}
+                        style={{
+                          background: "transparent",
+                          border: `1px solid ${theme.panelBorder}`,
+                          color: theme.textSubtle,
+                          borderRadius: 8,
+                          padding: "0.32rem 0.7rem",
+                          fontSize: "0.72rem",
+                          cursor: puterBusy ? "wait" : "pointer",
+                        }}
+                      >
+                        Sign out
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      onClick={handlePuterSignIn}
+                      disabled={puterBusy}
+                      style={{
+                        background: theme.accent,
+                        color: theme.bg,
+                        border: "none",
+                        borderRadius: 8,
+                        padding: "0.32rem 0.85rem",
+                        fontSize: "0.72rem",
+                        fontWeight: 500,
+                        cursor: puterBusy ? "wait" : "pointer",
+                      }}
+                    >
+                      Sign in to Puter
+                    </button>
+                  )}
+                </div>
+              </div>
+              {puterStatus && (
+                <div
+                  style={{
+                    fontSize: "0.68rem",
+                    color: puterStatus.startsWith("✓") ? "#6a9060" : puterStatus.startsWith("Error") ? "#c47a6e" : theme.accent,
+                    marginTop: "0.45rem",
+                  }}
+                >
+                  {puterStatus}
+                </div>
+              )}
+            </div>
+
+            <div style={{ fontSize: "0.68rem", color: theme.textMuted, marginTop: "0.7rem", lineHeight: 1.55 }}>
+              Puter.js routes requests through <a href="https://puter.com" target="_blank" rel="noopener noreferrer" style={{ color: theme.accent, textDecoration: "underline" }}>puter.com</a>. Anonymous use has a small free quota — sign in for your own account quota and the option to top up. PDF extraction still works via in-browser PDF.js, but for highest fidelity (figures, tables, layout) add an Anthropic key below.
             </div>
           </>
         )}
